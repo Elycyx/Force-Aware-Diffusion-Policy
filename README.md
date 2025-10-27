@@ -39,7 +39,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/force-aware-diffusion-policy.git
+git clone https://github.com/Elycyx/Force-Aware-Diffusion-Policy.git
 cd force-aware-diffusion-policy
 
 # Create conda environment
@@ -459,58 +459,3 @@ force-aware-diffusion-policy/
 ├── test_fadp_model.py           # Unit tests
 └── README.md                    # This file
 ```
-
-## 📚 Documentation
-
-- **[Force Data Flow](FORCE_DATA_FLOW.md)**: Detailed explanation of how force data flows through the system
-- **[Changelog](CHANGELOG.md)**: List of all modifications from original Diffusion Policy
-- **[Example Config](example_fadp_config.yaml)**: Fully commented configuration file
-
-## 🎓 Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@inproceedings{chi2023diffusionpolicy,
-  title={Diffusion Policy: Visuomotor Policy Learning via Action Diffusion},
-  author={Chi, Cheng and Feng, Siyuan and Du, Yilun and Xu, Zhenjia and Cousineau, Eric and Burchfiel, Benjamin and Song, Shuran},
-  booktitle={Proceedings of Robotics: Science and Systems (RSS)},
-  year={2023}
-}
-
-@software{fadp2024,
-  title={Force-Aware Diffusion Policy},
-  author={Your Name},
-  year={2024},
-  note={Extended from Diffusion Policy with force/torque sensing}
-}
-```
-
-## 🔗 Original Project
-
-This work is based on [Diffusion Policy](https://diffusion-policy.cs.columbia.edu/):
-- [Project Page](https://diffusion-policy.cs.columbia.edu/)
-- [Paper](https://arxiv.org/abs/2303.04137)
-- [Original Code](https://github.com/real-stanford/diffusion_policy)
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## 💬 Contact
-
-For questions or issues:
-- Open an issue on GitHub
-- Email: your.email@example.com
-
----
-
-**Note**: This is a research project. Always ensure safety when deploying on real robots. Test thoroughly in simulation and with safety measures before real-world deployment.

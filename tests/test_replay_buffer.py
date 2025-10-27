@@ -6,7 +6,7 @@ sys.path.append(ROOT_DIR)
 os.chdir(ROOT_DIR)
 
 import zarr
-from diffusion_policy.common.replay_buffer import ReplayBuffer
+from fadp.common.replay_buffer import ReplayBuffer
 
 def test():
     import numpy as np

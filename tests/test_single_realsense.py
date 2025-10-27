@@ -9,7 +9,7 @@ import cv2
 import json
 import time
 from multiprocessing.managers import SharedMemoryManager
-from diffusion_policy.real_world.single_realsense import SingleRealsense
+from fadp.real_world.single_realsense import SingleRealsense
 
 def test():
     

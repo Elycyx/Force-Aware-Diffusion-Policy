@@ -9,8 +9,8 @@ import cv2
 import json
 import time
 import numpy as np
-from diffusion_policy.real_world.multi_realsense import MultiRealsense
-from diffusion_policy.real_world.video_recorder import VideoRecorder
+from fadp.real_world.multi_realsense import MultiRealsense
+from fadp.real_world.video_recorder import VideoRecorder
 
 def test():
     config = json.load(open('/home/cchi/dev/diffusion_policy/diffusion_policy/real_world/realsense_config/415_high_accuracy_mode.json', 'r'))
@@ -24,7 +24,7 @@ def test():
         data['color'] = color
         return data
 
-    from diffusion_policy.common.cv2_util import get_image_transform
+    from fadp.common.cv2_util import get_image_transform
     color_transform = get_image_transform(
         input_res=(1280,720),
         output_res=(640,480), 

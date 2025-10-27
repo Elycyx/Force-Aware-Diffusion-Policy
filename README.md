@@ -90,7 +90,9 @@ python eval_real_robot.py \
 
 ## 📊 Data Preparation
 
-### Data Format
+> **📘 For detailed dataset format specification, see [DATASET_FORMAT.md](DATASET_FORMAT.md)**
+
+### Data Format Overview
 
 FADP expects data in **zarr** format with the following structure:
 
@@ -111,7 +113,21 @@ Force data should be a `(T, 6)` float32 array where:
 - `force[:, 0:3]` = Forces (fx, fy, fz) in Newtons
 - `force[:, 3:6]` = Torques (mx, my, mz) in Newton-meters
 
-### Example: Creating a Dataset
+### Convert Existing Data
+
+If you have data in HDF5 format, use our conversion script:
+
+```bash
+# Convert HDF5 episodes to FADP format
+python scripts/convert_hdf5_to_fadp.py \
+    --input "data/session_*" \
+    --output data/fadp_dataset \
+    --image-size 240 320
+
+# See scripts/README.md for more options
+```
+
+### Example: Creating a Dataset Manually
 
 ```python
 import zarr
@@ -134,6 +150,8 @@ with open('my_dataset/meta/episode_ends.json', 'w') as f:
 ```
 
 ## 🎯 Training
+
+> **📘 For complete training guide with troubleshooting, see [TRAINING_GUIDE.md](TRAINING_GUIDE.md)**
 
 ### Basic Training
 

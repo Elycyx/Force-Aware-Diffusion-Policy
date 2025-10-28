@@ -47,6 +47,7 @@ install_requires = [
     'numba',
     'dill',
     'imagecodecs',
+    "pandas",
 ]
 
 # Development dependencies

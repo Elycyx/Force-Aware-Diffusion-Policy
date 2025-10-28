@@ -42,7 +42,7 @@ policy:
   num_inference_steps: 8
   obs_as_global_cond: ${obs_as_global_cond}
   # crop_shape: [76, 76] # 84x84 90%
-  crop_shape: [288, 216] # ch, cw 320x240 90%
+  crop_shape: [216, 288] # ch, cw 320x240 90%
   # crop_shape: null
   diffusion_step_embed_dim: 128
   down_dims: [256,512,1024]

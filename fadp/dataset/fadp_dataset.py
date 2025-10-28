@@ -463,7 +463,7 @@ def test_fadp_dataset():
     
     # Create dataset
     dataset = FADPDataset(
-        dataset_path='data/foceumi1',
+        dataset_path='data/forceumi1',
         horizon=16,
         n_obs_steps=5,
         n_action_steps=8,

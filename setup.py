@@ -42,6 +42,11 @@ install_requires = [
     'matplotlib>=3.5.0',
     'imageio>=2.9.0',
     'imageio-ffmpeg>=0.4.5',
+
+    'robomimic',
+    'numba',
+    'dill',
+    'imagecodecs',
 ]
 
 # Development dependencies

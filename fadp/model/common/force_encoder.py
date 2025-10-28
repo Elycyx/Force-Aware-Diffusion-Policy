@@ -13,7 +13,7 @@ class ForceEncoder(nn.Module):
     Architecture: Linear -> Swish -> Linear
     """
     
-    def __init__(self, input_dim: int = 6, output_dim: int = 256, hidden_dim: int = 128):
+    def __init__(self, input_dim: int = 6, output_dim: int = 256, hidden_dim: int = 512):
         """
         Args:
             input_dim: Dimension of input force/torque data (default: 6 for fx,fy,fz,mx,my,mz)

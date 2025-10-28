@@ -38,7 +38,7 @@ class ForceAwareDiffusionPolicy(BaseImagePolicy):
             cond_predict_scale=True,
             obs_encoder_group_norm=False,
             eval_fixed_crop=False,
-            force_encoder_hidden_dim=128,
+            force_encoder_hidden_dim=512,
             # parameters passed to step
             **kwargs):
         super().__init__()

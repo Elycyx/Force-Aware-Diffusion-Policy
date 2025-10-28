@@ -301,7 +301,7 @@ def test():
     from omegaconf import OmegaConf
     OmegaConf.register_new_resolver("eval", eval, replace=True)
 
-    with hydra.initialize('../diffusion_policy/config'):
+    with hydra.initialize('../fadp/config'):
         cfg = hydra.compose('train_robomimic_real_image_workspace')
         OmegaConf.resolve(cfg)
         dataset = hydra.utils.instantiate(cfg.task.dataset)

@@ -51,7 +51,7 @@ def main(config_name, config_dir, seeds, monitor_key, ray_address,
     # initialize hydra
     if config_dir is None:
         config_path_abs = pathlib.Path(__file__).parent.joinpath(
-            'diffusion_policy','config')
+            'fadp','config')
         config_path_rel = str(config_path_abs.relative_to(pathlib.Path.cwd()))
     else:
         config_path_rel = config_dir

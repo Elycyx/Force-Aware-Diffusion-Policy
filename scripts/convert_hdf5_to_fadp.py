@@ -77,12 +77,16 @@ class HDF5ToFADPConverter:
         """
         Load data from a single HDF5 episode file.
         
+        Data transformation:
+        - Original 'state' is DISCARDED
+        - Original 'action' is used for BOTH 'state' and 'action' in FADP
+        
         Returns:
             Dictionary containing:
                 - image: (N, H, W, 3) uint8
                 - force: (N, 6) float32
                 - action: (N, 7) float32
-                - state: (N, 7) float32 (optional, not used in FADP)
+                - state: (N, 7) float32 (same as action, for compatibility)
                 - metadata: dict
         """
         with h5py.File(episode_path, 'r') as f:
@@ -90,6 +94,10 @@ class HDF5ToFADPConverter:
             images = f['image'][:]  # (N, H, W, 3)
             force = f['force'][:]   # (N, 6)
             action = f['action'][:] # (N, 7)
+            
+            # IMPORTANT: Use action as both state and action
+            # Original state is discarded
+            state = action.copy()   # Use action as state
             
             # Resize images if needed
             if images.shape[1:3] != self.image_size:
@@ -105,14 +113,11 @@ class HDF5ToFADPConverter:
             if 'metadata' in f.attrs:
                 metadata = dict(f.attrs['metadata'])
             
-            # Optional: load state for validation
-            state = f['state'][:] if 'state' in f else None
-            
             data = {
                 'image': images,
                 'force': force,
-                'action': action,
-                'state': state,
+                'action': action,    # Action from original dataset
+                'state': state,      # Same as action (not used in FADP)
                 'metadata': metadata,
             }
             
@@ -167,6 +172,10 @@ class HDF5ToFADPConverter:
         print("="*60)
         print("HDF5 to FADP Dataset Converter (Memory-Efficient)")
         print("="*60)
+        print("\n⚠️  Data Transformation Note:")
+        print("   - Original 'state' field is DISCARDED")
+        print("   - Original 'action' is used for BOTH state and action")
+        print("   - FADP learns action-to-action mappings\n")
         
         # Find all episodes
         episode_files = self.find_all_episodes()

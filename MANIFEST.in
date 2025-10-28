@@ -1,0 +1,28 @@
+# Include documentation
+include README.md
+include LICENSE
+include CHANGELOG.md
+include DATASET_FORMAT.md
+include TRAINING_GUIDE.md
+include FORCE_DATA_FLOW.md
+
+# Include configuration files
+recursive-include fadp/config *.yaml
+recursive-include fadp/config *.yml
+
+# Include scripts
+recursive-include scripts *.py
+include scripts/README.md
+
+# Exclude unnecessary files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude __pycache__
+global-exclude .DS_Store
+global-exclude *.so
+global-exclude *.dylib
+
+# Exclude data and outputs
+prune data
+prune outputs
+

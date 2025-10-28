@@ -9,10 +9,35 @@ Before training, ensure you have:
 1. ✅ Converted your HDF5 data to FADP format (see `scripts/README.md`)
 2. ✅ Validated the dataset format (see `DATASET_FORMAT.md`)
 3. ✅ Installed all dependencies (`conda env create -f conda_environment.yaml`)
+4. ✅ Understand the difference between datasets (see [Dataset Choice](#-dataset-choice) below)
+
+## 📦 Dataset Choice
+
+FADP provides two dataset classes:
+
+### FADPDataset (Recommended) ⭐
+
+- **Modern design**: Built specifically for FADP
+- **Relative actions**: Learns delta from first state in action chunk
+- **Efficient**: Direct zarr loading without intermediate buffers
+- **Simple configuration**: Direct parameter specification
+- **Use case**: New projects, better generalization needed
+
+See [FADP_DATASET.md](FADP_DATASET.md) for detailed documentation.
+
+### RealPushTImageDataset (Legacy)
+
+- **Compatibility**: Works with existing robomimic-style data
+- **Absolute actions**: Learns absolute target positions
+- **ReplayBuffer**: Uses intermediate buffer for flexibility
+- **Complex configuration**: Requires shape_meta parsing
+- **Use case**: Existing projects, absolute positioning needed
 
 ## 🚀 Quick Start
 
-### Step 1: Prepare Your Dataset
+### Option 1: Using FADPDataset (Recommended)
+
+#### Step 1: Prepare Your Dataset
 
 After converting with `convert_hdf5_to_fadp.py`, you should have:
 
@@ -26,7 +51,33 @@ data/fadp_dataset/
     └── episode_ends.json
 ```
 
-### Step 2: Create Task Configuration
+#### Step 2: Test the Dataset
+
+```bash
+python test_fadp_dataset.py --dataset data/fadp_dataset --compare
+```
+
+This will verify:
+- Dataset loads correctly
+- Relative actions are computed properly
+- Normalization works
+- Compare relative vs absolute action representations
+
+#### Step 3: Start Training
+
+```bash
+python train.py --config-name=train_fadp task.dataset.dataset_path=data/fadp_dataset
+```
+
+That's it! The `train_fadp.yaml` configuration is already set up for FADPDataset.
+
+### Option 2: Using RealPushTImageDataset (Legacy)
+
+#### Step 1: Prepare Your Dataset
+
+Same as Option 1.
+
+#### Step 2: Create Task Configuration
 
 Create a task config file at `fadp/config/task/my_robot_task.yaml`:
 

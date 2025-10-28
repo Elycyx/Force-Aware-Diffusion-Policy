@@ -56,7 +56,7 @@ episode_*.hdf5
 ├── /image              # (N, H, W, 3) uint8
 ├── /force              # (N, 6) float32
 ├── /action             # (N, 7) float32
-└── /state              # (N, 7) float32 (optional)
+└── /state              # (N, 7) float32 (will be DISCARDED)
 ```
 
 **Required fields:**
@@ -64,8 +64,12 @@ episode_*.hdf5
 - `force`: Force/torque measurements (fx, fy, fz, mx, my, mz)
 - `action`: Robot actions (dx, dy, dz, drx, dry, drz, gripper)
 
+**Important Data Transformation:**
+- ⚠️ Original `state` field is **DISCARDED**
+- ✅ Original `action` is used for **BOTH** state and action in FADP
+- This is because FADP learns action-to-action mappings
+
 **Optional fields:**
-- `state`: Robot state (not used in FADP)
 - `timestamp*`: Various timestamps (not used in FADP)
 - `metadata`: Episode metadata
 

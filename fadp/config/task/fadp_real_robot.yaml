@@ -1,0 +1,38 @@
+name: fadp_real_robot
+
+# Image configuration
+image_shape: [3, 240, 320]  # [C, H, W]
+dataset_path: data/fadp_dataset
+
+# Shape metadata - defines observation and action spaces
+shape_meta: &shape_meta
+  obs:
+    camera_0:
+      shape: ${task.image_shape}
+      type: rgb
+    force:
+      shape: [6]  # fx, fy, fz, mx, my, mz
+      type: low_dim
+  action:
+    shape: [7]  # dx, dy, dz, drx, dry, drz, gripper
+
+# Environment runner (optional, for real robot evaluation)
+env_runner:
+  _target_: fadp.env_runner.real_pusht_image_runner.RealPushTImageRunner
+
+# Dataset configuration - using new FADP dataset
+dataset:
+  _target_: fadp.dataset.fadp_dataset.FADPDataset
+  dataset_path: ${task.dataset_path}
+  horizon: 16                # Total prediction horizon
+  n_obs_steps: 2             # Number of observation frames
+  n_action_steps: 8          # Number of actions to execute
+  image_keys: ['camera_0']   # List of camera keys
+  force_key: 'force'         # Force data key
+  action_key: 'action'       # Action data key
+  use_relative_action: True  # Use relative actions (delta from first state)
+  use_reference_noise: True  # Add noise to reference pose for augmentation
+  reference_noise_scale: [0.01, 0.01, 0.01, 0.02, 0.02, 0.02]  # [x,y,z,rx,ry,rz]
+  val_ratio: 0.05            # 5% validation split
+  seed: 42
+

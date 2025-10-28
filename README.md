@@ -35,29 +35,25 @@
 - Python 3.9+
 - Conda or Miniconda
 
-### Setup Environment
+### Method 1: Using Conda (Recommended)
+
+This method installs all dependencies including simulation environments:
 
 ```bash
 # Clone the repository
 git clone https://github.com/Elycyx/Force-Aware-Diffusion-Policy.git
-cd force-aware-diffusion-policy
+cd Force-Aware-Diffusion-Policy
 
-# Create conda environment
-conda env create -f conda_environment.yaml
-conda activate robodiff
+# Create conda environment from yaml
+conda create -n fadp python=3.10
 
-# Install the package
+# Activate environment
+conda activate fadp
+
+# Install FADP package in editable mode
 pip install -e .
 ```
 
-### Verify Installation
-
-```bash
-# Run tests to verify everything works
-python test_fadp_model.py
-```
-
-Expected output: All tests should pass, showing model structure and parameter counts.
 
 ## 🚀 Quick Start
 
@@ -90,9 +86,17 @@ python eval_real_robot.py \
 
 ## 📊 Data Preparation
 
-> **📘 For detailed dataset format specification, see [DATASET_FORMAT.md](DATASET_FORMAT.md)**
+> **📘 Documentation:**
+> - [DATASET_FORMAT.md](DATASET_FORMAT.md) - Detailed dataset format specification
+> - [FADP_DATASET.md](FADP_DATASET.md) - **NEW**: FADP Dataset class with relative action support
+> - [TRAINING_GUIDE.md](TRAINING_GUIDE.md) - Comprehensive training guide
 
 ### Data Format Overview
+
+FADP supports two dataset classes:
+
+1. **FADPDataset (Recommended)**: Modern, efficient dataset with relative action support
+2. **RealPushTImageDataset**: Legacy dataset for backward compatibility
 
 FADP expects data in **zarr** format with the following structure:
 
@@ -154,6 +158,16 @@ with open('my_dataset/meta/episode_ends.json', 'w') as f:
 > **📘 For complete training guide with troubleshooting, see [TRAINING_GUIDE.md](TRAINING_GUIDE.md)**
 
 ### Basic Training
+
+#### Using FADPDataset (Recommended - with relative actions)
+
+```bash
+python train.py --config-name=train_fadp
+```
+
+This uses the new `FADPDataset` which supports relative actions (delta from first state).
+
+#### Using RealPushTImageDataset (Legacy - absolute actions)
 
 ```bash
 python train.py --config-name=train_force_aware_diffusion_policy_real

@@ -1,0 +1,103 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fadp"
+version = "1.0.0"
+description = "Force-Aware Diffusion Policy for Robot Manipulation"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "FADP Contributors"}
+]
+keywords = ["robot-learning", "diffusion-policy", "force-control", "manipulation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Robotics",
+]
+
+dependencies = [
+    "torch>=1.10.0",
+    "torchvision>=0.11.0",
+    "diffusers>=0.11.1",
+    "numpy>=1.20.0",
+    "zarr>=2.10.0",
+    "h5py>=3.6.0",
+    "opencv-python>=4.5.0",
+    "scipy>=1.7.0",
+    "hydra-core>=1.2.0",
+    "omegaconf>=2.2.0",
+    "wandb>=0.12.0",
+    "tqdm>=4.62.0",
+    "filelock>=3.4.0",
+    "threadpoolctl>=3.0.0",
+    "av>=9.0.0",
+    "matplotlib>=3.5.0",
+    "imageio>=2.9.0",
+    "imageio-ffmpeg>=0.4.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=3.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "ipython>=8.0.0",
+    "jupyter>=1.0.0",
+]
+robot = [
+    "pyrealsense2>=2.50.0",
+]
+all = [
+    "fadp[dev,robot]",
+]
+
+[project.urls]
+Homepage = "https://github.com/Elycyx/Force-Aware-Diffusion-Policy"
+Documentation = "https://github.com/Elycyx/Force-Aware-Diffusion-Policy/blob/main/README.md"
+Repository = "https://github.com/Elycyx/Force-Aware-Diffusion-Policy"
+Issues = "https://github.com/Elycyx/Force-Aware-Diffusion-Policy/issues"
+
+[tool.setuptools]
+packages = ["fadp"]
+
+[tool.setuptools.package-data]
+fadp = ["config/**/*.yaml", "config/**/*.yml"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | data
+  | outputs
+)/
+'''
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=fadp --cov-report=term-missing"
+

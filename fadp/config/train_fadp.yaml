@@ -1,0 +1,157 @@
+defaults:
+  - _self_
+  - task: fadp_real_robot
+
+name: train_fadp
+_target_: fadp.workspace.train_force_aware_diffusion_policy_workspace.TrainForceAwareDiffusionPolicyWorkspace
+
+task_name: ${task.name}
+shape_meta: ${task.shape_meta}
+exp_name: "default"
+
+# Temporal parameters
+horizon: 16              # Total prediction horizon
+n_obs_steps: 2          # Number of observation steps (history)
+n_action_steps: 8       # Number of actions to execute
+n_latency_steps: 0      # Action execution latency
+dataset_obs_steps: ${n_obs_steps}
+past_action_visible: False
+keypoint_visible_rate: 1.0
+obs_as_global_cond: True  # Use observations as global conditioning
+
+# Policy configuration
+policy:
+  _target_: fadp.policy.force_aware_diffusion_policy.ForceAwareDiffusionPolicy
+
+  shape_meta: ${shape_meta}
+  
+  # Diffusion noise scheduler
+  noise_scheduler:
+    _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
+    num_train_timesteps: 100
+    beta_start: 0.0001
+    beta_end: 0.02
+    beta_schedule: squaredcos_cap_v2
+    clip_sample: True
+    set_alpha_to_one: True
+    steps_offset: 0
+    prediction_type: epsilon
+
+  # Temporal parameters
+  horizon: ${horizon}
+  n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
+  n_obs_steps: ${n_obs_steps}
+  num_inference_steps: 8
+  obs_as_global_cond: ${obs_as_global_cond}
+  
+  # Vision encoder parameters
+  crop_shape: [216, 288]  # [ch, cw] - 90% of 240x320
+  eval_fixed_crop: True
+  obs_encoder_group_norm: True
+  
+  # UNet architecture
+  diffusion_step_embed_dim: 128
+  down_dims: [256, 512, 1024]
+  kernel_size: 5
+  n_groups: 8
+  cond_predict_scale: True
+  
+  # Force encoder parameters
+  force_encoder_hidden_dim: 512  # Hidden dimension for force MLP
+
+# Exponential Moving Average
+ema:
+  _target_: fadp.model.diffusion.ema_model.EMAModel
+  update_after_step: 0
+  inv_gamma: 1.0
+  power: 0.75
+  min_value: 0.0
+  max_value: 0.9999
+
+# Data loading
+dataloader:
+  batch_size: 64
+  num_workers: 8
+  shuffle: True
+  pin_memory: True
+  persistent_workers: True
+
+val_dataloader:
+  batch_size: 64
+  num_workers: 8
+  shuffle: False
+  pin_memory: True
+  persistent_workers: True
+
+# Optimizer
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1.0e-4
+  betas: [0.95, 0.999]
+  eps: 1.0e-8
+  weight_decay: 1.0e-6
+
+# Training configuration
+training:
+  device: "cuda:0"
+  seed: 42
+  debug: False
+  resume: True
+  
+  # Optimization
+  lr_scheduler: cosine
+  lr_warmup_steps: 500
+  num_epochs: 600
+  gradient_accumulate_every: 1
+  
+  # EMA (important: use GroupNorm instead of BatchNorm when using EMA)
+  use_ema: True
+  
+  # Training loop control (in epochs)
+  rollout_every: 50      # Evaluate on real robot every N epochs
+  checkpoint_every: 50   # Save checkpoint every N epochs
+  val_every: 1           # Validate every N epochs
+  sample_every: 5        # Log samples every N epochs
+  
+  # Steps per epoch (null = use all data)
+  max_train_steps: null
+  max_val_steps: null
+  
+  # Misc
+  tqdm_interval_sec: 1.0
+
+# Logging (Weights & Biases)
+logging:
+  project: fadp_training
+  resume: True
+  mode: online
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  tags: ["${name}", "${task_name}", "${exp_name}"]
+  id: null
+  group: null
+
+# Checkpoint management
+checkpoint:
+  topk:
+    monitor_key: train_loss
+    mode: min
+    k: 5
+    format_str: 'epoch={epoch:04d}-train_loss={train_loss:.3f}.ckpt'
+  save_last_ckpt: True
+  save_last_snapshot: False
+
+# Multi-run configuration
+multi_run:
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+
+# Hydra configuration
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  sweep:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    subdir: ${hydra.job.num}
+

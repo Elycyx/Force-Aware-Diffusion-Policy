@@ -299,13 +299,37 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
                 #             step_log['val_loss'] = val_loss
                 
                 def log_action_mse(step_log, category, pred_action, gt_action):
-                    B, T, _ = pred_action.shape
-                    pred_action = pred_action.view(B, T, -1, 10)
-                    gt_action = gt_action.view(B, T, -1, 10)
-                    step_log[f'{category}_action_mse_error'] = torch.nn.functional.mse_loss(pred_action, gt_action)
-                    step_log[f'{category}_action_mse_error_pos'] = torch.nn.functional.mse_loss(pred_action[..., :3], gt_action[..., :3])
-                    step_log[f'{category}_action_mse_error_rot'] = torch.nn.functional.mse_loss(pred_action[..., 3:9], gt_action[..., 3:9])
-                    step_log[f'{category}_action_mse_error_width'] = torch.nn.functional.mse_loss(pred_action[..., 9], gt_action[..., 9])
+                    B, T, D = pred_action.shape
+                    # 动态检测action维度：7维(axis-angle) 或 10维(rot6d)
+                    if D % 7 == 0:
+                        action_dim = 7
+                        n_robots = D // 7
+                    elif D % 10 == 0:
+                        action_dim = 10
+                        n_robots = D // 10
+                    else:
+                        action_dim = D
+                        n_robots = 1
+                    
+                    if action_dim == 7:
+                        # axis-angle格式: 3 pos + 3 rot + 1 gripper
+                        pred_action = pred_action.view(B, T, n_robots, 7)
+                        gt_action = gt_action.view(B, T, n_robots, 7)
+                        step_log[f'{category}_action_mse_error'] = torch.nn.functional.mse_loss(pred_action, gt_action)
+                        step_log[f'{category}_action_mse_error_pos'] = torch.nn.functional.mse_loss(pred_action[..., :3], gt_action[..., :3])
+                        step_log[f'{category}_action_mse_error_rot'] = torch.nn.functional.mse_loss(pred_action[..., 3:6], gt_action[..., 3:6])
+                        step_log[f'{category}_action_mse_error_gripper'] = torch.nn.functional.mse_loss(pred_action[..., 6], gt_action[..., 6])
+                    elif action_dim == 10:
+                        # rot6d格式: 3 pos + 6 rot6d + 1 gripper
+                        pred_action = pred_action.view(B, T, n_robots, 10)
+                        gt_action = gt_action.view(B, T, n_robots, 10)
+                        step_log[f'{category}_action_mse_error'] = torch.nn.functional.mse_loss(pred_action, gt_action)
+                        step_log[f'{category}_action_mse_error_pos'] = torch.nn.functional.mse_loss(pred_action[..., :3], gt_action[..., :3])
+                        step_log[f'{category}_action_mse_error_rot'] = torch.nn.functional.mse_loss(pred_action[..., 3:9], gt_action[..., 3:9])
+                        step_log[f'{category}_action_mse_error_gripper'] = torch.nn.functional.mse_loss(pred_action[..., 9], gt_action[..., 9])
+                    else:
+                        # 不支持的维度，只记录总MSE
+                        step_log[f'{category}_action_mse_error'] = torch.nn.functional.mse_loss(pred_action, gt_action)
                 # run diffusion sampling on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0 and accelerator.is_main_process:
                     with torch.no_grad():

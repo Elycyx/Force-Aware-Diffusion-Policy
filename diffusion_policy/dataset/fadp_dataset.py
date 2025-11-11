@@ -238,6 +238,7 @@ class FadpDataset(BaseDataset):
         self.temporally_independent_normalization = temporally_independent_normalization
         
         # 处理pose_noise_scale：统一转换为6个值的数组
+        # 支持 OmegaConf ListConfig
         if isinstance(pose_noise_scale, (list, tuple, np.ndarray)):
             # 如果是列表/数组，确保有6个值
             pose_noise_scale = np.array(pose_noise_scale, dtype=np.float32)
@@ -245,9 +246,20 @@ class FadpDataset(BaseDataset):
                 raise ValueError(f"pose_noise_scale列表长度必须为6，实际为{len(pose_noise_scale)}")
             self.pose_noise_scale = pose_noise_scale
         else:
-            # 如果是单个值，扩展为6个相同的值
-            scale_value = float(pose_noise_scale)
-            self.pose_noise_scale = np.array([scale_value] * 6, dtype=np.float32)
+            # 尝试转换为列表（处理 OmegaConf ListConfig）
+            try:
+                pose_noise_list = list(pose_noise_scale)
+                pose_noise_scale = np.array(pose_noise_list, dtype=np.float32)
+                if len(pose_noise_scale) != 6:
+                    raise ValueError(f"pose_noise_scale列表长度必须为6，实际为{len(pose_noise_scale)}")
+                self.pose_noise_scale = pose_noise_scale
+            except (TypeError, ValueError) as e:
+                # 如果是单个值，扩展为6个相同的值
+                try:
+                    scale_value = float(pose_noise_scale)
+                    self.pose_noise_scale = np.array([scale_value] * 6, dtype=np.float32)
+                except (TypeError, ValueError):
+                    raise ValueError(f"无法将 pose_noise_scale 转换为有效值: {pose_noise_scale}") from e
         
         self.threadpool_limits_is_applied = False
     
@@ -276,17 +288,29 @@ class FadpDataset(BaseDataset):
         """
         计算归一化参数
         
-        对于action (7维: 3 pos + 3 rot + 1 gripper):
-        - 前3维 (x,y,z): 使用range normalization
-        - 中3维 (rx,ry,rz): 使用identity normalization (axis-angle)
-        - 最后1维 (gripper): 使用range normalization
+        对于action (可能是7维或13维):
+        - 7维格式: [x, y, z, rx, ry, rz, gripper]
+          - 前3维 (x,y,z): 使用range normalization
+          - 中3维 (rx,ry,rz): 使用identity normalization (axis-angle)
+          - 最后1维 (gripper): 使用range normalization
+        
+        - 13维格式: [x, y, z, rx, ry, rz, gripper, fx, fy, fz, mx, my, mz]
+          - 前3维 (x,y,z): 使用range normalization
+          - 中3维 (rx,ry,rz): 使用identity normalization (axis-angle)
+          - 第7维 (gripper): 使用range normalization
+          - 后6维 (fx, fy, fz, mx, my, mz): 使用range normalization
+        
+        对于force观测 (6维: fx, fy, fz, mx, my, mz):
+        - 使用range normalization（如果存在force数据）
         
         对于RGB图像: 使用[0,1]归一化
         """
         normalizer = LinearNormalizer()
         
-        # 收集action数据用于计算统计信息
+        # 收集action和force数据用于计算统计信息
         action_data = list()
+        force_data_dict = {key: list() for key in self.lowdim_keys if 'force' in key.lower()}
+        
         self.sampler.ignore_rgb(True)
         dataloader = torch.utils.data.DataLoader(
             dataset=self,
@@ -295,6 +319,11 @@ class FadpDataset(BaseDataset):
         )
         for batch in tqdm(dataloader, desc='计算归一化参数'):
             action_data.append(copy.deepcopy(batch['action']))
+            # 收集force数据（如果存在）
+            if 'obs' in batch:
+                for key in force_data_dict.keys():
+                    if key in batch['obs']:
+                        force_data_dict[key].append(copy.deepcopy(batch['obs'][key]))
         self.sampler.ignore_rgb(False)
         
         # 合并所有action数据
@@ -307,28 +336,72 @@ class FadpDataset(BaseDataset):
             action_data = action_data.reshape(B*T, D)
         
         # 为action的不同部分创建不同的归一化器
-        # 每个机器人: 7维 = 3 pos + 3 rot + 1 gripper
-        assert action_data.shape[-1] % self.num_robot == 0
-        dim_a = action_data.shape[-1] // self.num_robot
+        # 检测action维度: 7维或13维
+        action_dim_total = action_data.shape[-1]
+        
+        if action_dim_total % 13 == 0:
+            # 13维格式: 7维action + 6维force
+            dim_a = 13
+            has_force_in_action = True
+        elif action_dim_total % 7 == 0:
+            # 7维格式: 仅action
+            dim_a = 7
+            has_force_in_action = False
+        else:
+            raise ValueError(f"Unexpected action dimension: {action_dim_total}")
+        
+        n_robots = action_dim_total // dim_a
         action_normalizers = list()
-        for i in range(self.num_robot):
+        
+        for i in range(n_robots):
+            start_idx = i * dim_a
+            
+            # 位置 (3维) - range normalization
             action_normalizers.append(
                 get_range_normalizer_from_stat(
-                    array_to_stats(action_data[..., i * dim_a: i * dim_a + 3])
+                    array_to_stats(action_data[..., start_idx: start_idx + 3])
                 )
-            )  # 位置 (3维)
+            )
+            
+            # 旋转 (3维 axis-angle) - identity normalization
             action_normalizers.append(
                 get_identity_normalizer_from_stat(
-                    array_to_stats(action_data[..., i * dim_a + 3: (i + 1) * dim_a - 1])
+                    array_to_stats(action_data[..., start_idx + 3: start_idx + 6])
                 )
-            )  # 旋转 (3维 axis-angle)
+            )
+            
+            # 夹爪 (1维) - range normalization
             action_normalizers.append(
                 get_range_normalizer_from_stat(
-                    array_to_stats(action_data[..., (i + 1) * dim_a - 1: (i + 1) * dim_a])
+                    array_to_stats(action_data[..., start_idx + 6: start_idx + 7])
                 )
-            )  # 夹爪 (1维)
+            )
+            
+            # 如果包含force (6维) - range normalization
+            if has_force_in_action:
+                action_normalizers.append(
+                    get_range_normalizer_from_stat(
+                        array_to_stats(action_data[..., start_idx + 7: start_idx + 13])
+                    )
+                )
         
         normalizer['action'] = concatenate_normalizer(action_normalizers)
+        
+        # Force归一化（如果存在）
+        for key, data_list in force_data_dict.items():
+            if len(data_list) > 0:
+                force_data = np.concatenate(data_list)
+                assert force_data.shape[0] == len(self.sampler)
+                assert len(force_data.shape) == 3  # (B, T, 6)
+                
+                if not self.temporally_independent_normalization:
+                    B, T, D = force_data.shape
+                    force_data = force_data.reshape(B*T, D)
+                
+                # Force使用range normalization
+                normalizer[key] = get_range_normalizer_from_stat(
+                    array_to_stats(force_data)
+                )
         
         # 图像归一化（简单的[0,1]归一化）
         for key in self.rgb_keys:
@@ -365,11 +438,63 @@ class FadpDataset(BaseDataset):
             obs_dict[key] = np.moveaxis(data[key], -1, 1).astype(np.float32) / 255.
             del data[key]
         
-        # 读取state数据（用于计算相对action，但不输出）
+        # 读取state数据
+        # - 包含'eef'或'gripper'的key: 用于计算相对action，但不输出
+        # - 包含'force'的key: 
+        #   * 历史部分作为观测输出到obs_dict
+        #   * 需要从replay buffer重新读取与action时间范围对齐的未来force
         state_dict = dict()
+        future_force_data = None  # 用于存储future force数据（与action时间对齐）
+        
         for key in self.sampler_lowdim_keys:
-            state_dict[key] = data[key].astype(np.float32)
-            del data[key]
+            if key in data:
+                data_value = data[key].astype(np.float32)
+                
+                # Force数据特殊处理
+                if 'force' in key.lower():
+                    # 观测force（历史，用于encoder）
+                    obs_dict[key] = data_value  # (T_force_obs, 6) - 例如6步
+                    
+                    # ⚠️ 关键修复：从replay buffer重新读取与action时间范围对齐的force
+                    # data_value只有force_obs_horizon步（如6步）
+                    # 我们需要action_horizon步（如16步）的future force
+                    # 
+                    # 获取当前样本的时间信息（来自sampler）
+                    current_idx, start_idx, end_idx, before_first_grasp = self.sampler.indices[idx]
+                    
+                    # 计算action的时间范围（与sampler中action采样逻辑一致）
+                    action_horizon = self.key_horizon['action']
+                    action_down_sample = self.key_down_sample_steps['action']
+                    action_latency = self.key_latency_steps['action']
+                    
+                    # action的起始索引（与sampler逻辑一致）
+                    action_start_idx = current_idx - action_latency
+                    action_end_idx = action_start_idx + (action_horizon - 1) * action_down_sample + 1
+                    
+                    # 从sampler的replay_buffer读取force（与其他lowdim数据一致）
+                    if key in self.sampler.replay_buffer:
+                        force_arr = self.sampler.replay_buffer[key]
+                        
+                        # 采样force序列（使用与action相同的逻辑）
+                        force_indices = np.arange(action_start_idx, min(action_end_idx, end_idx), action_down_sample)
+                        future_force_data = force_arr[force_indices].astype(np.float32)
+                        
+                        # 如果长度不足action_horizon，使用padding
+                        if len(future_force_data) < action_horizon:
+                            if self.action_padding and len(future_force_data) > 0:
+                                # 用最后一个值填充
+                                pad_length = action_horizon - len(future_force_data)
+                                padding = np.tile(future_force_data[-1:], (pad_length, 1))
+                                future_force_data = np.concatenate([future_force_data, padding], axis=0)
+                            else:
+                                # 如果没有padding，截断到实际长度
+                                pass
+                    
+                else:
+                    # State数据（eef_pos, eef_rot, gripper）用于action计算
+                    state_dict[key] = data_value
+                
+                del data[key]
         
         # ============ 处理action：转换为相对表示 ============
         # 
@@ -459,7 +584,61 @@ class FadpDataset(BaseDataset):
             actions.append(np.concatenate([action_pos, action_rot, action_gripper], axis=-1))
         
         # 合并所有机器人的action
-        action = np.concatenate(actions, axis=-1)
+        action = np.concatenate(actions, axis=-1)  # (T_action, 7*num_robot)
+        
+        # ============ 添加未来force到action ============
+        # 
+        # 预测相对力（增量）：与action的相对表示保持一致
+        # 
+        # 理由：
+        # 1. 与action的相对表示一致，训练更稳定
+        # 2. 力的变化范围通常比绝对值小，更容易学习和归一化
+        # 3. 更关注力的变化趋势（接触检测、力控制等）
+        # 4. 减少对初始力标定误差的依赖
+        # 
+        # 数据维度说明：
+        # - action: (T_action, 7) 其中 T_action = action_horizon
+        # - obs_dict['force']: (T_force_obs, 6) 其中 T_force_obs = force_obs_horizon (历史)
+        # - future_force_data: sampler返回的完整force数据
+        # 
+        if 'force' in self.lowdim_keys and future_force_data is not None:
+            # future_force_data是sampler返回的完整数据
+            # 它的长度应该与action的长度一致（都经过相同的采样）
+            T_action = action.shape[0]
+            
+            # 获取当前观测的最后一个force值作为参考（相对力的基准）
+            if 'force' in obs_dict and obs_dict['force'].shape[0] > 0:
+                current_force = obs_dict['force'][-1]  # (6,) 当前时刻的force（参考值）
+            else:
+                # 如果没有观测force，使用future_force_data的第一个值作为参考
+                current_force = future_force_data[0]  # (6,)
+            
+            # 处理future_force_data的长度
+            if future_force_data.shape[0] == T_action:
+                future_force_abs = future_force_data  # (T_action, 6)
+            elif future_force_data.shape[0] > T_action:
+                future_force_abs = future_force_data[:T_action]  # (T_action, 6)
+            else:
+                # future_force_data更短，需要填充
+                # 这种情况不应该发生，但以防万一
+                pad_length = T_action - future_force_data.shape[0]
+                # 使用最后一个值填充
+                last_force = future_force_data[-1]  # (6,)
+                padding = np.tile(last_force, (pad_length, 1))  # (pad_length, 6)
+                future_force_abs = np.concatenate([future_force_data, padding], axis=0)  # (T_action, 6)
+            
+            # 计算相对力（增量）：future_force - current_force
+            # 这样模型预测的是相对于当前力的变化量
+            future_force_delta = future_force_abs - current_force  # (T_action, 6)
+            
+            # 拼接action和相对force
+            action = np.concatenate([action, future_force_delta], axis=-1)  # (T_action, 13)
+        elif 'force' in self.lowdim_keys:
+            # Fallback: 如果没有future_force_data，使用零增量
+            # 表示力不变（相对增量为0）
+            T_action = action.shape[0]
+            future_force_delta = np.zeros((T_action, 6), dtype=np.float32)
+            action = np.concatenate([action, future_force_delta], axis=-1)  # (T_action, 13)
         
         # 转换为PyTorch tensors（只输出RGB观测和action）
         torch_data = {

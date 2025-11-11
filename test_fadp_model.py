@@ -29,8 +29,10 @@ from collections import defaultdict
 ROOT_DIR = str(pathlib.Path(__file__).parent)
 sys.path.append(ROOT_DIR)
 
+from diffusion_policy.workspace.train_diffusion_unet_fadp_workspace import TrainDiffusionUnetFADPWorkspace
 from diffusion_policy.workspace.train_diffusion_unet_image_workspace import TrainDiffusionUnetImageWorkspace
 from diffusion_policy.policy.diffusion_unet_timm_policy import DiffusionUnetTimmPolicy
+from diffusion_policy.policy.diffusion_unet_fadp_policy import DiffusionUnetFADPPolicy
 from diffusion_policy.dataset.fadp_dataset import FadpDataset
 from diffusion_policy.common.pytorch_util import dict_apply
 
@@ -51,14 +53,25 @@ def load_checkpoint(checkpoint_path):
     # 解析配置
     OmegaConf.resolve(cfg)
     
-    # 创建workspace和policy
-    workspace = TrainDiffusionUnetImageWorkspace(cfg)
+    # 根据配置中的workspace类型选择正确的workspace
+    workspace_target = cfg.get('_target_', '')
+    
+    if 'fadp' in workspace_target.lower():
+        print("检测到FADP workspace，使用 TrainDiffusionUnetFADPWorkspace")
+        workspace = TrainDiffusionUnetFADPWorkspace(cfg)
+    else:
+        print("使用默认 TrainDiffusionUnetImageWorkspace")
+        workspace = TrainDiffusionUnetImageWorkspace(cfg)
+    
     workspace.load_payload(checkpoint, exclude_keys=None, include_keys=None)
     
     # 获取policy
     policy = workspace.model
-    if hasattr(workspace, 'ema_model'):
+    if hasattr(workspace, 'ema_model') and workspace.ema_model is not None:
+        print("使用EMA模型")
         policy = workspace.ema_model
+    else:
+        print("使用主模型")
     
     policy.eval()
     
@@ -98,7 +111,7 @@ def compute_action_metrics(pred_actions, gt_actions, n_robots=1):
     计算action预测指标
     
     Args:
-        pred_actions: (N, T, D) 预测的actions
+        pred_actions: (N, T, D) 预测的actions，可能是7维、10维或13维
         gt_actions: (N, T, D) 真实的actions
         n_robots: 机器人数量
     
@@ -118,10 +131,19 @@ def compute_action_metrics(pred_actions, gt_actions, n_robots=1):
     
     # 检测action维度
     D = pred_actions.shape[-1]
-    if D % 7 == 0:
+    has_force = False
+    
+    if D % 13 == 0:
+        # 13维格式: 7维action + 6维force
+        action_dim = 13
+        n_robots = D // 13
+        has_force = True
+    elif D % 7 == 0:
         action_dim = 7
+        n_robots = D // 7
     elif D % 10 == 0:
         action_dim = 10
+        n_robots = D // 10
     else:
         action_dim = D
         n_robots = 1
@@ -130,7 +152,21 @@ def compute_action_metrics(pred_actions, gt_actions, n_robots=1):
     for robot_id in range(n_robots):
         start_idx = robot_id * action_dim
         
-        if action_dim == 7:
+        if action_dim == 13:
+            # 13维格式: 3 pos + 3 rot + 1 gripper + 6 force
+            pos_pred = pred_actions[..., start_idx:start_idx+3]
+            pos_gt = gt_actions[..., start_idx:start_idx+3]
+            
+            rot_pred = pred_actions[..., start_idx+3:start_idx+6]
+            rot_gt = gt_actions[..., start_idx+3:start_idx+6]
+            
+            gripper_pred = pred_actions[..., start_idx+6]
+            gripper_gt = gt_actions[..., start_idx+6]
+            
+            force_pred = pred_actions[..., start_idx+7:start_idx+13]
+            force_gt = gt_actions[..., start_idx+7:start_idx+13]
+            
+        elif action_dim == 7:
             # axis-angle格式
             pos_pred = pred_actions[..., start_idx:start_idx+3]
             pos_gt = gt_actions[..., start_idx:start_idx+3]
@@ -181,6 +217,29 @@ def compute_action_metrics(pred_actions, gt_actions, n_robots=1):
         metrics[f'{prefix}gripper_mse'] = np.mean((gripper_pred - gripper_gt) ** 2)
         metrics[f'{prefix}gripper_mae'] = np.mean(np.abs(gripper_pred - gripper_gt))
         metrics[f'{prefix}gripper_rmse'] = np.sqrt(metrics[f'{prefix}gripper_mse'])
+        
+        # Force指标（如果有）
+        if action_dim == 13:
+            metrics[f'{prefix}force_mse'] = np.mean((force_pred - force_gt) ** 2)
+            metrics[f'{prefix}force_mae'] = np.mean(np.abs(force_pred - force_gt))
+            metrics[f'{prefix}force_rmse'] = np.sqrt(metrics[f'{prefix}force_mse'])
+            
+            # 分解为平移力和力矩
+            force_linear_pred = force_pred[..., :3]  # fx, fy, fz
+            force_linear_gt = force_gt[..., :3]
+            force_angular_pred = force_pred[..., 3:]  # mx, my, mz
+            force_angular_gt = force_gt[..., 3:]
+            
+            metrics[f'{prefix}force_linear_mse'] = np.mean((force_linear_pred - force_linear_gt) ** 2)
+            metrics[f'{prefix}force_linear_mae'] = np.mean(np.abs(force_linear_pred - force_linear_gt))
+            metrics[f'{prefix}force_angular_mse'] = np.mean((force_angular_pred - force_angular_gt) ** 2)
+            metrics[f'{prefix}force_angular_mae'] = np.mean(np.abs(force_angular_pred - force_angular_gt))
+            
+            # L2范数误差
+            force_l2_error = np.linalg.norm(force_pred - force_gt, axis=-1)
+            metrics[f'{prefix}force_l2_mean'] = np.mean(force_l2_error)
+            metrics[f'{prefix}force_l2_std'] = np.std(force_l2_error)
+            metrics[f'{prefix}force_l2_max'] = np.max(force_l2_error)
     
     return metrics
 
@@ -302,6 +361,22 @@ def print_metrics(metrics):
         print(f"  MSE:  {metrics[f'{prefix}gripper_mse']:.6f}")
         print(f"  MAE:  {metrics[f'{prefix}gripper_mae']:.6f}")
         print(f"  RMSE: {metrics[f'{prefix}gripper_rmse']:.6f}")
+        
+        # Force指标（如果有）
+        if f'{prefix}force_mse' in metrics:
+            print(f"\n{robot_name} Force误差:")
+            print(f"  MSE:  {metrics[f'{prefix}force_mse']:.6f}")
+            print(f"  MAE:  {metrics[f'{prefix}force_mae']:.6f}")
+            print(f"  RMSE: {metrics[f'{prefix}force_rmse']:.6f}")
+            print(f"  L2 误差 - 均值: {metrics[f'{prefix}force_l2_mean']:.6f}, "
+                  f"标准差: {metrics[f'{prefix}force_l2_std']:.6f}, "
+                  f"最大: {metrics[f'{prefix}force_l2_max']:.6f}")
+            
+            print(f"\n{robot_name} Force分量误差:")
+            print(f"  平移力 (fx,fy,fz) - MSE: {metrics[f'{prefix}force_linear_mse']:.6f}, "
+                  f"MAE: {metrics[f'{prefix}force_linear_mae']:.6f}")
+            print(f"  力矩 (mx,my,mz) - MSE: {metrics[f'{prefix}force_angular_mse']:.6f}, "
+                  f"MAE: {metrics[f'{prefix}force_angular_mae']:.6f}")
 
 
 def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
@@ -320,7 +395,12 @@ def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
     num_vis = min(num_vis, N)
     
     # 检测action维度
-    if D % 7 == 0:
+    has_force = False
+    if D % 13 == 0:
+        action_dim = 13
+        n_robots = D // 13
+        has_force = True
+    elif D % 7 == 0:
         action_dim = 7
         n_robots = D // 7
     elif D % 10 == 0:
@@ -332,14 +412,26 @@ def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
     
     # 1. 绘制action轨迹对比
     for sample_idx in range(num_vis):
-        fig, axes = plt.subplots(3, n_robots, figsize=(6*n_robots, 12))
+        # 根据是否有force调整子图数量
+        n_rows = 4 if has_force else 3
+        fig, axes = plt.subplots(n_rows, n_robots, figsize=(6*n_robots, 4*n_rows))
         if n_robots == 1:
-            axes = axes.reshape(3, 1)
+            axes = axes.reshape(n_rows, 1)
         
         for robot_id in range(n_robots):
             start_idx = robot_id * action_dim
             
-            if action_dim == 7:
+            if action_dim == 13:
+                # 13维: 3 pos + 3 rot + 1 gripper + 6 force
+                pos_pred = pred_actions[sample_idx, :, start_idx:start_idx+3]
+                pos_gt = gt_actions[sample_idx, :, start_idx:start_idx+3]
+                rot_pred = pred_actions[sample_idx, :, start_idx+3:start_idx+6]
+                rot_gt = gt_actions[sample_idx, :, start_idx+3:start_idx+6]
+                gripper_pred = pred_actions[sample_idx, :, start_idx+6]
+                gripper_gt = gt_actions[sample_idx, :, start_idx+6]
+                force_pred = pred_actions[sample_idx, :, start_idx+7:start_idx+13]
+                force_gt = gt_actions[sample_idx, :, start_idx+7:start_idx+13]
+            elif action_dim == 7:
                 pos_pred = pred_actions[sample_idx, :, start_idx:start_idx+3]
                 pos_gt = gt_actions[sample_idx, :, start_idx:start_idx+3]
                 rot_pred = pred_actions[sample_idx, :, start_idx+3:start_idx+6]
@@ -347,6 +439,7 @@ def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
                 gripper_pred = pred_actions[sample_idx, :, start_idx+6]
                 gripper_gt = gt_actions[sample_idx, :, start_idx+6]
             else:
+                # action_dim == 10
                 pos_pred = pred_actions[sample_idx, :, start_idx:start_idx+3]
                 pos_gt = gt_actions[sample_idx, :, start_idx:start_idx+3]
                 rot_pred = pred_actions[sample_idx, :, start_idx+3:start_idx+9]
@@ -385,6 +478,21 @@ def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
             axes[2, robot_id].set_ylabel('Gripper Value')
             axes[2, robot_id].legend()
             axes[2, robot_id].grid(True, alpha=0.3)
+            
+            # Force (if available)
+            if has_force:
+                # 绘制6个force维度: fx, fy, fz, mx, my, mz
+                force_labels = ['fx', 'fy', 'fz', 'mx', 'my', 'mz']
+                for i in range(6):
+                    axes[3, robot_id].plot(force_gt[:, i], label=f'GT {force_labels[i]}', 
+                                          linestyle='--', alpha=0.7)
+                    axes[3, robot_id].plot(force_pred[:, i], label=f'Pred {force_labels[i]}', 
+                                          alpha=0.7)
+                axes[3, robot_id].set_title(f'Robot {robot_id} - Force')
+                axes[3, robot_id].set_xlabel('Time Step')
+                axes[3, robot_id].set_ylabel('Force Value')
+                axes[3, robot_id].legend(ncol=2, fontsize=8)
+                axes[3, robot_id].grid(True, alpha=0.3)
         
         plt.tight_layout()
         plt.savefig(f'{save_dir}/action_trajectory_sample_{sample_idx}.png', dpi=150)
@@ -393,7 +501,11 @@ def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
     # 2. Plot error distribution
     errors = pred_actions - gt_actions
     
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    # 根据是否有force调整子图布局
+    if has_force:
+        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    else:
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     
     # Overall error distribution
     axes[0, 0].hist(errors.flatten(), bins=50, edgecolor='black')
@@ -405,7 +517,12 @@ def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
     # Error by dimension
     for robot_id in range(n_robots):
         start_idx = robot_id * action_dim
-        if action_dim == 7:
+        if action_dim == 13:
+            pos_errors = errors[:, :, start_idx:start_idx+3]
+            rot_errors = errors[:, :, start_idx+3:start_idx+6]
+            gripper_errors = errors[:, :, start_idx+6]
+            force_errors = errors[:, :, start_idx+7:start_idx+13]
+        elif action_dim == 7:
             pos_errors = errors[:, :, start_idx:start_idx+3]
             rot_errors = errors[:, :, start_idx+3:start_idx+6]
             gripper_errors = errors[:, :, start_idx+6]
@@ -417,8 +534,14 @@ def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
         label_prefix = f'R{robot_id} ' if n_robots > 1 else ''
         
         axes[0, 1].hist(pos_errors.flatten(), bins=30, alpha=0.5, label=f'{label_prefix}Position')
-        axes[1, 0].hist(rot_errors.flatten(), bins=30, alpha=0.5, label=f'{label_prefix}Rotation')
-        axes[1, 1].hist(gripper_errors.flatten(), bins=30, alpha=0.5, label=f'{label_prefix}Gripper')
+        
+        if has_force:
+            axes[0, 2].hist(rot_errors.flatten(), bins=30, alpha=0.5, label=f'{label_prefix}Rotation')
+            axes[1, 0].hist(gripper_errors.flatten(), bins=30, alpha=0.5, label=f'{label_prefix}Gripper')
+            axes[1, 1].hist(force_errors.flatten(), bins=30, alpha=0.5, label=f'{label_prefix}Force')
+        else:
+            axes[1, 0].hist(rot_errors.flatten(), bins=30, alpha=0.5, label=f'{label_prefix}Rotation')
+            axes[1, 1].hist(gripper_errors.flatten(), bins=30, alpha=0.5, label=f'{label_prefix}Gripper')
     
     axes[0, 1].set_title('Position Error Distribution')
     axes[0, 1].set_xlabel('Error')
@@ -426,17 +549,57 @@ def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
     axes[0, 1].legend()
     axes[0, 1].grid(True, alpha=0.3)
     
-    axes[1, 0].set_title('Rotation Error Distribution')
-    axes[1, 0].set_xlabel('Error')
-    axes[1, 0].set_ylabel('Frequency')
-    axes[1, 0].legend()
-    axes[1, 0].grid(True, alpha=0.3)
+    if has_force:
+        axes[0, 2].set_title('Rotation Error Distribution')
+        axes[0, 2].set_xlabel('Error')
+        axes[0, 2].set_ylabel('Frequency')
+        axes[0, 2].legend()
+        axes[0, 2].grid(True, alpha=0.3)
+        
+        axes[1, 0].set_title('Gripper Error Distribution')
+        axes[1, 0].set_xlabel('Error')
+        axes[1, 0].set_ylabel('Frequency')
+        axes[1, 0].legend()
+        axes[1, 0].grid(True, alpha=0.3)
+    else:
+        axes[1, 0].set_title('Rotation Error Distribution')
+        axes[1, 0].set_xlabel('Error')
+        axes[1, 0].set_ylabel('Frequency')
+        axes[1, 0].legend()
+        axes[1, 0].grid(True, alpha=0.3)
+        
+        axes[1, 1].set_title('Gripper Error Distribution')
+        axes[1, 1].set_xlabel('Error')
+        axes[1, 1].set_ylabel('Frequency')
+        axes[1, 1].legend()
+        axes[1, 1].grid(True, alpha=0.3)
     
-    axes[1, 1].set_title('Gripper Error Distribution')
-    axes[1, 1].set_xlabel('Error')
-    axes[1, 1].set_ylabel('Frequency')
-    axes[1, 1].legend()
-    axes[1, 1].grid(True, alpha=0.3)
+    if has_force:
+        axes[1, 1].set_title('Force Error Distribution')
+        axes[1, 1].set_xlabel('Error')
+        axes[1, 1].set_ylabel('Frequency')
+        axes[1, 1].legend()
+        axes[1, 1].grid(True, alpha=0.3)
+        
+        # 添加force分量误差分布
+        axes[1, 2].clear()
+        for robot_id in range(n_robots):
+            start_idx = robot_id * action_dim
+            force_errors = errors[:, :, start_idx+7:start_idx+13]
+            force_linear_errors = force_errors[:, :, :3]  # fx, fy, fz
+            force_angular_errors = force_errors[:, :, 3:]  # mx, my, mz
+            
+            label_prefix = f'R{robot_id} ' if n_robots > 1 else ''
+            axes[1, 2].hist(force_linear_errors.flatten(), bins=30, alpha=0.5, 
+                           label=f'{label_prefix}Linear Force')
+            axes[1, 2].hist(force_angular_errors.flatten(), bins=30, alpha=0.5, 
+                           label=f'{label_prefix}Angular Force')
+        
+        axes[1, 2].set_title('Force Components Error Distribution')
+        axes[1, 2].set_xlabel('Error')
+        axes[1, 2].set_ylabel('Frequency')
+        axes[1, 2].legend()
+        axes[1, 2].grid(True, alpha=0.3)
     
     plt.tight_layout()
     plt.savefig(f'{save_dir}/error_distribution.png', dpi=150)
@@ -504,7 +667,9 @@ def main(checkpoint, num_samples, batch_size, device, visualize, save_dir, use_t
     print("计算评估指标...")
     n_robots = 1
     D = results['pred_actions'].shape[-1]
-    if D % 7 == 0:
+    if D % 13 == 0:
+        n_robots = D // 13
+    elif D % 7 == 0:
         n_robots = D // 7
     elif D % 10 == 0:
         n_robots = D // 10

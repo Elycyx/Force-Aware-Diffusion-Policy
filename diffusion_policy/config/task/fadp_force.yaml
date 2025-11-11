@@ -1,0 +1,87 @@
+name: fadp_force
+
+# 观测和动作的时间窗口
+img_obs_horizon: 2      # RGB图像历史窗口（默认2帧）
+force_obs_horizon: 6    # 力传感器历史窗口（默认6帧，捕捉力的变化趋势）
+action_horizon: 16
+obs_down_sample_steps: 3
+
+shape_meta: &shape_meta
+  # 观测数据
+  obs:
+    # RGB图像观测（输出到policy）
+    camera0_rgb:
+      shape: [3, 224, 224]
+      horizon: ${img_obs_horizon}  # 使用独立的视觉历史窗口
+      latency_steps: 0
+      down_sample_steps: ${obs_down_sample_steps}
+      type: rgb
+      ignore_by_policy: False
+    
+    # 力传感器数据（输出到policy）
+    # 注意: key是'force'而不是'robot0_force'，与convert_session_to_zarr.py一致
+    force:
+      shape: [6]  # [fx, fy, fz, mx, my, mz]
+      horizon: ${force_obs_horizon}  # 使用独立的力传感器历史窗口
+      latency_steps: 0
+      down_sample_steps: ${obs_down_sample_steps}
+      type: low_dim
+      ignore_by_policy: False
+    
+    # 以下state数据用于计算相对action，但不输出给policy
+    robot0_eef_pos:
+      shape: [3]
+      horizon: ${img_obs_horizon}
+      latency_steps: 0
+      down_sample_steps: ${obs_down_sample_steps}
+      type: low_dim
+      ignore_by_policy: True
+    robot0_eef_rot_axis_angle:
+      shape: [3]
+      horizon: ${img_obs_horizon}
+      latency_steps: 0
+      down_sample_steps: ${obs_down_sample_steps}
+      type: low_dim
+      ignore_by_policy: True
+    robot0_gripper_width:
+      shape: [1]
+      horizon: ${img_obs_horizon}
+      latency_steps: 0
+      down_sample_steps: ${obs_down_sample_steps}
+      type: low_dim
+      ignore_by_policy: True
+  
+  # 动作定义（包含未来的力预测）
+  action: 
+    shape: [13]  # [x, y, z, rx, ry, rz, gripper, fx, fy, fz, mx, my, mz] - action + future force
+    horizon: ${action_horizon}
+    latency_steps: 0
+    down_sample_steps: ${obs_down_sample_steps}
+    rotation_rep: axis_angle_with_force  # 扩展的表示，包含力
+
+task_name: &task_name fadp_force
+dataset_path: data/session_20251025_142256/dataset.zarr.zip
+
+pose_repr: &pose_repr
+  obs_pose_repr: relative
+  action_pose_repr: relative
+
+env_runner:
+  _target_: diffusion_policy.env_runner.real_pusht_image_runner.RealPushTImageRunner
+
+dataset:
+  _target_: diffusion_policy.dataset.fadp_dataset.FadpDataset
+  shape_meta: *shape_meta
+  dataset_path: ${dataset_path}
+  cache_dir: null
+  pose_repr: *pose_repr
+  action_padding: False
+  temporally_independent_normalization: False
+  repeat_frame_prob: 0.0
+  max_duration: null
+  seed: 42
+  val_ratio: 0.05
+  # 数据增强：对位姿添加高斯噪声（标准差）
+  # 分别对应 [x, y, z, rx, ry, rz] 的标准差
+  pose_noise_scale: [0.0001, 0.0001, 0.0001, 0.001, 0.001, 0.001]
+

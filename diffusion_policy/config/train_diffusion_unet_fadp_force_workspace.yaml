@@ -1,16 +1,17 @@
 defaults:
   - _self_
-  - task: fadp
+  - task: fadp_force
 
-name: train_diffusion_unet_timm_fadp
-_target_: diffusion_policy.workspace.train_diffusion_unet_image_workspace.TrainDiffusionUnetImageWorkspace
+name: train_diffusion_unet_fadp_force
+_target_: diffusion_policy.workspace.train_diffusion_unet_fadp_workspace.TrainDiffusionUnetFADPWorkspace
 
 task_name: ${task.name}
 shape_meta: ${task.shape_meta}
 exp_name: "default"
 
-# 从task配置中获取这些变量，供shape_meta和其他配置使用
+# 从task配置中获取变量
 img_obs_horizon: ${task.img_obs_horizon}
+force_obs_horizon: ${task.force_obs_horizon}
 action_horizon: ${task.action_horizon}
 obs_down_sample_steps: ${task.obs_down_sample_steps}
 dataset_path: ${task.dataset_path}
@@ -19,7 +20,7 @@ pose_repr: ${task.pose_repr}
 n_action_steps: 8
 
 policy:
-  _target_: diffusion_policy.policy.diffusion_unet_timm_policy.DiffusionUnetTimmPolicy
+  _target_: diffusion_policy.policy.diffusion_unet_fadp_policy.DiffusionUnetFADPPolicy
 
   shape_meta: ${shape_meta}
   
@@ -35,32 +36,34 @@ policy:
     prediction_type: epsilon
 
   obs_encoder:
-    _target_: diffusion_policy.model.vision.timm_obs_encoder.TimmObsEncoder
+    _target_: diffusion_policy.model.vision.fadp_encoder.FADPEncoder
     shape_meta: ${shape_meta}
 
-    # 使用预训练的ViT模型
-    model_name: 'vit_base_patch16_clip_224.openai'
-    pretrained: True
-    frozen: False
+    # DINOv3 settings (使用HuggingFace transformers)
+    # 可用的HuggingFace模型:
+    #   facebook/dinov3-vit-small-pretrain-lvd1689m  (384d)
+    #   facebook/dinov3-vit-base-pretrain-lvd1689m   (768d, 默认)
+    #   facebook/dinov3-vit-large-pretrain-lvd1689m  (1024d)
+    #   facebook/dinov3-vit-giant-pretrain-lvd1689m  (1536d)
+    #   facebook/dinov3-convnext-tiny-pretrain-lvd1689m
+    #   facebook/dinov3-convnext-small-pretrain-lvd1689m
+    #   facebook/dinov3-convnext-base-pretrain-lvd1689m
+    #   facebook/dinov3-convnext-large-pretrain-lvd1689m
+    dinov3_model: '/mnt/lx/cyx/universal_manipulation_interface/models/dinov3-vitb16-pretrain-lvd1689m'
+    dinov3_frozen: False  # 设置为True以冻结DINOv3权重
+    use_huggingface: True  # 使用HuggingFace transformers (推荐)
     
-    global_pool: ''
-    feature_aggregation: 'attention_pool_2d'
-    position_encording: 'sinusoidal'
-    downsample_ratio: 32
-
-    # 数据增强
-    transforms:
-      - type: RandomCrop
-        ratio: 0.95
-      - _target_: torchvision.transforms.ColorJitter
-        brightness: 0.3
-        contrast: 0.4
-        saturation: 0.5
-        hue: 0.08
-
-    use_group_norm: True
-    share_rgb_model: False
-    imagenet_norm: True
+    # Force MLP encoder settings
+    force_mlp_hidden_dim: 256
+    force_mlp_layers: 3
+    
+    # Cross attention settings
+    num_attention_heads: 8
+    attention_dropout: 0.1
+    
+    # Data augmentation transforms (仅在use_huggingface=False时生效)
+    # HuggingFace会使用自己的image processor
+    transforms: null
 
   num_inference_steps: 16
   obs_as_global_cond: True
@@ -71,6 +74,7 @@ policy:
   cond_predict_scale: True
   input_pertub: 0.1
   train_diffusion_n_samples: 1
+  force_loss_weight: 0.5  # 力预测loss的权重（相对于action loss）
 
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
@@ -96,7 +100,7 @@ val_dataloader:
 
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 3.0e-4
+  lr: 1.0e-4
   betas: [0.95, 0.999]
   eps: 1.0e-8
   weight_decay: 1.0e-6
@@ -109,11 +113,13 @@ training:
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 2000
-  num_epochs: 100
+  num_epochs: 200
   gradient_accumulate_every: 1
+  # EMA destroys performance when used with BatchNorm
+  # replace BatchNorm with GroupNorm.
   use_ema: True
-  freeze_encoder: False
   # training loop control
+  # in epochs
   rollout_every: 10
   checkpoint_every: 10
   val_every: 1
@@ -125,7 +131,7 @@ training:
   tqdm_interval_sec: 1.0
 
 logging:
-  project: fadp
+  project: fadp_force_training
   resume: False
   mode: online
   name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
@@ -135,10 +141,10 @@ logging:
 
 checkpoint:
   topk:
-    monitor_key: train_loss
+    monitor_key: val_loss
     mode: min
-    k: 5
-    format_str: 'epoch={epoch:04d}-train_loss={train_loss:.3f}.ckpt'
+    k: 20
+    format_str: 'epoch={epoch:04d}-val_loss={val_loss:.3f}.ckpt'
   save_last_ckpt: True
   save_last_snapshot: False
 

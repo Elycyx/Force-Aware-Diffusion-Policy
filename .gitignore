@@ -174,3 +174,7 @@ cython_debug/
 
 test_results_train/
 test_results_val/
+
+*.png
+
+models

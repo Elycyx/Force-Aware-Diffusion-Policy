@@ -7,18 +7,24 @@ A comprehensive framework for robot manipulation learning using diffusion polici
 This project implements a complete pipeline for learning manipulation policies from demonstration data:
 
 1. **Data Conversion**: Convert HDF5 demonstration data to zarr format for efficient training
-2. **Dataset Support**: Support for FADP (Force-Augmented Diffusion Policy) and UMI (Universal Manipulation Interface) datasets
-3. **Training**: Train diffusion-based policies using vision and proprioceptive inputs
-4. **Evaluation**: Test trained models and visualize performance
+2. **Dataset Support**: Support for FADP Force (multimodal vision+force), basic FADP, and UMI datasets
+3. **Training**: Train diffusion-based policies with advanced multimodal encoders (DINOv3 + Force)
+4. **Evaluation**: Test trained models and visualize performance with detailed metrics
+5. **Force Prediction**: Predict future force/torque alongside actions for contact-rich tasks
 
 ## Features
 
+- **Multimodal Learning**: FADP Force architecture with DINOv3 vision encoder and force sensor integration
+- **Advanced Encoder**: Bidirectional cross-attention fusion between vision (DINOv3-ViT-Base) and force features
+- **Force Prediction**: 13D output including both action (7D) and future force (6D) predictions
+- **Independent History Windows**: Separate configurable history lengths for vision and force modalities
 - **Multi-format Support**: Convert HDF5 session data to zarr format with optimized compression
 - **Vision-based Learning**: Support for RGB image inputs with efficient image processing
 - **Force/Torque Sensing**: Integration of force/torque data from robot end-effector
-- **Flexible Data Augmentation**: Configurable pose noise augmentation for improved robustness
+- **Flexible Data Augmentation**: Per-dimension configurable pose noise for improved robustness
 - **Parallel Processing**: Multi-threaded and multi-process support for fast data conversion
-- **Comprehensive Inspection Tools**: Utilities for inspecting and validating converted datasets
+- **Comprehensive Testing**: Model evaluation with detailed visualizations and metrics
+- **Monitoring & Logging**: WandB integration with detailed loss component tracking
 
 ## Installation
 
@@ -40,6 +46,14 @@ cd universal_manipulation_interface
 conda env create -f conda_environment.yaml
 conda activate umi
 ```
+
+3. Install additional dependencies (for FADP Force):
+```bash
+pip install transformers  # For DINOv3 from HuggingFace
+pip install accelerate    # For distributed training
+```
+
+**Note**: For FADP Force models, we use DINOv3 from HuggingFace Transformers instead of torch hub.
 
 ## Quick Start
 
@@ -89,7 +103,11 @@ python inspect_zarr.py data/session_20251025_142256/dataset.zarr.zip --visualize
 Train a diffusion policy using the converted data:
 
 ```bash
-# Train with FADP dataset (vision-only, recommended)
+# Train with FADP Force (vision + force, RECOMMENDED)
+python train.py --config-name=train_diffusion_unet_fadp_force_workspace \
+    task.dataset_path=data/session_20251025_142256/dataset.zarr.zip
+
+# Train with basic FADP (vision-only)
 python train.py --config-name=train_diffusion_unet_timm_fadp_workspace \
     task.dataset_path=data/session_20251025_142256/dataset.zarr.zip
 
@@ -103,8 +121,24 @@ python train.py --config-name=train_diffusion_unet_timm_umi_workspace \
 Evaluate your trained model:
 
 ```bash
-python test_fadp_model.py --checkpoint <path_to_checkpoint> \
+# Test FADP Force model (13D output)
+python test_fadp_model.py \
+    --checkpoint data/outputs/<experiment>/checkpoints/latest.ckpt \
     --dataset-path data/session_20251025_142256/dataset.zarr.zip
+
+# Test on training set
+python test_fadp_model.py \
+    --checkpoint data/outputs/<experiment>/checkpoints/latest.ckpt \
+    --dataset-path data/session_20251025_142256/dataset.zarr.zip \
+    --dataset-type train
+```
+
+### 5. Visualize Force Data (Optional)
+
+For FADP Force models, verify force processing:
+
+```bash
+python visualize_obs_future_force.py
 ```
 
 ## Data Format
@@ -137,14 +171,14 @@ The converted zarr file contains:
 
 ## Dataset Types
 
-### FADP Dataset (Recommended)
+### FADP Dataset (Basic)
 
-**Force-Augmented Diffusion Policy** - Vision-only learning with force/torque data:
+**Force-Augmented Diffusion Policy** - Vision-only learning:
 
 - **Observation**: RGB images only (no proprioception to policy)
 - **Action**: 7D relative pose [x, y, z, rx, ry, rz, gripper] in axis-angle representation
 - **State Data**: Used internally for computing relative actions, not provided to policy
-- **Force Data**: Available for training but not required
+- **Force Data**: Not used in basic version
 - **Data Augmentation**: Gaussian noise on poses during training (configurable)
 
 **Configuration**: `diffusion_policy/config/task/fadp.yaml`
@@ -152,6 +186,58 @@ The converted zarr file contains:
 **Training Command**:
 ```bash
 python train.py --config-name=train_diffusion_unet_timm_fadp_workspace
+```
+
+### FADP Force Dataset (Advanced, Recommended)
+
+**Force-Augmented Diffusion Policy with Force Prediction** - Multimodal learning with force/torque integration:
+
+- **Observation**: 
+  - RGB images (default: 2 history steps)
+  - Force/torque sensor data (default: 6 history steps)
+  - Independent history windows for each modality
+- **Action**: 13D output combining pose and force
+  - 7D relative pose [x, y, z, rx, ry, rz, gripper] (axis-angle)
+  - 6D relative force [fx, fy, fz, mx, my, mz] (delta from current)
+- **Model Architecture**:
+  - **Vision Encoder**: DINOv3-ViT-Base (from HuggingFace Transformers)
+  - **Force Encoder**: MLP for low-dimensional force features
+  - **Fusion**: Bidirectional Cross-Attention between vision and force tokens
+- **Loss Function**: Weighted combination of action loss and force loss
+- **Data Augmentation**: Per-dimension Gaussian noise on poses
+
+**Configuration**: `diffusion_policy/config/task/fadp_force.yaml`
+
+**Training Command**:
+```bash
+# Basic training with default settings
+python train.py --config-name=train_diffusion_unet_fadp_force_workspace \
+    task.dataset_path=data/session_20251025_142256/dataset.zarr.zip
+
+# Custom history windows
+python train.py --config-name=train_diffusion_unet_fadp_force_workspace \
+    task.dataset_path=data/session_20251025_142256/dataset.zarr.zip \
+    task.img_obs_horizon=3 \
+    task.force_obs_horizon=8
+
+# Custom force loss weight
+python train.py --config-name=train_diffusion_unet_fadp_force_workspace \
+    task.dataset_path=data/session_20251025_142256/dataset.zarr.zip \
+    policy.force_loss_weight=0.5
+```
+
+**Testing Command**:
+```bash
+# Test on validation set (default)
+python test_fadp_model.py \
+    --checkpoint data/outputs/<experiment>/checkpoints/latest.ckpt \
+    --dataset-path data/session_20251025_142256/dataset.zarr.zip
+
+# Test on training set
+python test_fadp_model.py \
+    --checkpoint data/outputs/<experiment>/checkpoints/latest.ckpt \
+    --dataset-path data/session_20251025_142256/dataset.zarr.zip \
+    --dataset-type train
 ```
 
 ### UMI Dataset
@@ -197,6 +283,30 @@ python train.py --config-name=train_diffusion_unet_timm_fadp_workspace \
 
 **Note**: Validation set never uses noise augmentation.
 
+### FADP Force Configuration
+
+The FADP Force model supports independent history windows and force loss weighting:
+
+```yaml
+# History windows
+img_obs_horizon: 2      # Number of RGB history steps (default: 2)
+force_obs_horizon: 6    # Number of force history steps (default: 6)
+action_horizon: 16      # Number of future action steps (default: 16)
+
+# Force loss weight
+force_loss_weight: 1.0  # Weight for force prediction loss (default: 1.0)
+
+# DINOv3 model selection
+dinov3_model: facebook/dinov3-vit-base-pretrain-lvd1689m  # HuggingFace model name
+```
+
+**Key Parameters**:
+- `img_obs_horizon`: Vision observations are averaged over time steps
+- `force_obs_horizon`: Force observations are flattened and processed by MLP
+- `force_loss_weight`: Balance between action loss and force loss (0.5-2.0 typical range)
+
+**Configuration file**: `diffusion_policy/config/task/fadp_force.yaml`
+
 ## Performance Optimization
 
 ### Fast Data Conversion
@@ -240,35 +350,85 @@ python inspect_fadp_dataset.py --dataset-path <dataset.zarr.zip>
 
 ### Model Testing
 
-**test_fadp_model.py**: Test trained FADP models
+**test_fadp_model.py**: Test trained FADP models (supports both 7D and 13D outputs)
 ```bash
+# Test on validation set
 python test_fadp_model.py \
     --checkpoint <checkpoint_path> \
     --dataset-path <dataset.zarr.zip> \
     --output-dir <output_dir>
+
+# Test on training set
+python test_fadp_model.py \
+    --checkpoint <checkpoint_path> \
+    --dataset-path <dataset.zarr.zip> \
+    --dataset-type train \
+    --output-dir <output_dir>
+
+# Test specific number of samples
+python test_fadp_model.py \
+    --checkpoint <checkpoint_path> \
+    --dataset-path <dataset.zarr.zip> \
+    --num-samples 10
 ```
+
+**Output Visualizations**:
+- Action trajectory plots (7 or 13 dimensions)
+- Error distribution histograms
+- Per-dimension error analysis
+- Force prediction plots (for FADP Force models)
+
+### Force Data Visualization
+
+**visualize_obs_future_force.py**: Visualize force observations and predictions
+```bash
+python visualize_obs_future_force.py
+```
+
+**Features**:
+- Compare historical force observations (6 steps) vs future predictions (16 steps)
+- Verify force data continuity and alignment
+- Analyze force delta (relative) vs absolute values
+- Generate detailed comparison plots for multiple samples
+
+**Output**:
+- `force_obs_future_comparison_sample_X.png`: Detailed force visualization
+- Terminal statistics: force ranges, trends, and continuity checks
 
 ## Project Structure
 
 ```
 universal_manipulation_interface/
-├── convert_session_to_zarr.py    # Data conversion script
-├── train.py                       # Training script
-├── test_fadp_model.py            # Model testing script
-├── inspect_zarr.py                # Zarr inspection utility
-├── inspect_fadp_dataset.py       # FADP dataset inspection
-├── diffusion_policy/              # Core diffusion policy framework
-│   ├── config/                    # Training configurations
-│   │   ├── task/                  # Task-specific configs (fadp.yaml, umi.yaml)
-│   │   └── train_*.yaml           # Training workspace configs
-│   ├── dataset/                   # Dataset classes
-│   │   ├── fadp_dataset.py        # FADP dataset implementation
-│   │   └── umi_dataset.py         # UMI dataset implementation
-│   ├── policy/                    # Policy implementations
-│   ├── model/                     # Model architectures
-│   └── workspace/                # Training workspaces
-└── data/                          # Data directory
-    └── session_*/                 # Session data directories
+├── convert_session_to_zarr.py         # Data conversion script
+├── train.py                            # Training script
+├── test_fadp_model.py                 # Model testing script (7D/13D support)
+├── inspect_zarr.py                     # Zarr inspection utility
+├── inspect_fadp_dataset.py            # FADP dataset inspection
+├── visualize_obs_future_force.py      # Force data visualization
+├── diffusion_policy/                   # Core diffusion policy framework
+│   ├── config/                         # Training configurations
+│   │   ├── task/
+│   │   │   ├── fadp.yaml              # Basic FADP config (7D action)
+│   │   │   ├── fadp_force.yaml        # FADP Force config (13D action)
+│   │   │   └── umi.yaml               # UMI config
+│   │   ├── train_diffusion_unet_timm_fadp_workspace.yaml
+│   │   ├── train_diffusion_unet_fadp_force_workspace.yaml
+│   │   └── train_*.yaml
+│   ├── dataset/                        # Dataset classes
+│   │   ├── fadp_dataset.py            # FADP dataset (supports 7D/13D)
+│   │   └── umi_dataset.py             # UMI dataset
+│   ├── policy/                         # Policy implementations
+│   │   ├── diffusion_unet_fadp_policy.py  # FADP Force policy
+│   │   └── diffusion_unet_timm_policy.py  # Basic policy
+│   ├── model/                          # Model architectures
+│   │   └── vision/
+│   │       ├── fadp_encoder.py        # DINOv3 + Force encoder
+│   │       └── timm_obs_encoder.py    # Timm encoder
+│   └── workspace/                      # Training workspaces
+│       ├── train_diffusion_unet_fadp_workspace.py  # FADP workspace
+│       └── train_diffusion_unet_image_workspace.py # Basic workspace
+└── data/                               # Data directory
+    └── session_*/                      # Session data directories
 ```
 
 ## Troubleshooting
@@ -328,6 +488,180 @@ Process multiple sessions:
 for session in data/session_*/; do
     python convert_session_to_zarr.py -i "$session" --fast-save
 done
+```
+
+## Code Usage Examples
+
+### Using FADP Force in Your Code
+
+#### Loading a Trained Model
+
+```python
+import torch
+from omegaconf import OmegaConf
+from diffusion_policy.workspace.train_diffusion_unet_fadp_workspace import TrainDiffusionUnetFADPWorkspace
+
+# Load checkpoint
+checkpoint_path = "data/outputs/experiment/checkpoints/latest.ckpt"
+checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+
+# Get configuration
+cfg = checkpoint['cfg']
+
+# Create workspace
+workspace = TrainDiffusionUnetFADPWorkspace(cfg)
+
+# Load model weights
+workspace.load_payload(checkpoint, exclude_keys=None, include_keys=None)
+
+# Get policy
+policy = workspace.model
+policy.eval()
+```
+
+#### Making Predictions
+
+```python
+import torch
+
+# Prepare observations
+obs = {
+    'camera0_rgb': torch.randn(1, 2, 3, 224, 224),  # (B, T_img, C, H, W)
+    'force': torch.randn(1, 6, 6)                    # (B, T_force, force_dim)
+}
+
+# Predict action and force
+with torch.no_grad():
+    result = policy.predict_action(obs)
+
+# Extract results
+action_only = result['action_only']      # (B, T_pred, 7) - pose only
+force_pred = result['force_pred']        # (B, T_pred, 6) - predicted force
+action = result['action']                # (B, T_pred, 13) - combined output
+
+print(f"Predicted action shape: {action_only.shape}")
+print(f"Predicted force shape: {force_pred.shape}")
+```
+
+#### Understanding the Output
+
+```python
+# The 13D output is structured as:
+# - Dimensions 0-6: Relative pose [x, y, z, rx, ry, rz, gripper]
+# - Dimensions 7-12: Relative force [fx, fy, fz, mx, my, mz]
+
+# Action components
+position_delta = action[:, :, 0:3]      # Position change
+rotation_delta = action[:, :, 3:6]      # Rotation change (axis-angle)
+gripper_delta = action[:, :, 6:7]       # Gripper change
+
+# Force components (relative to current force)
+force_delta = action[:, :, 7:13]        # Force change
+linear_force = force_delta[:, :, 0:3]   # fx, fy, fz
+angular_force = force_delta[:, :, 3:6]  # mx, my, mz
+```
+
+#### Custom Dataset Configuration
+
+```python
+from omegaconf import OmegaConf
+from diffusion_policy.dataset.fadp_dataset import FadpDataset
+
+# Load configuration
+cfg = OmegaConf.load('diffusion_policy/config/task/fadp_force.yaml')
+OmegaConf.resolve(cfg)
+
+# Create dataset with custom parameters
+dataset = FadpDataset(
+    shape_meta=OmegaConf.to_container(cfg.shape_meta, resolve=True),
+    dataset_path='data/session_20251025_142256/dataset.zarr.zip',
+    pose_repr=OmegaConf.to_container(cfg.get('pose_repr', {}), resolve=True),
+    pose_noise_scale=[0.001, 0.001, 0.001, 0.001, 0.001, 0.001],  # Per-dim noise
+    action_padding=False,
+    val_ratio=0.05,
+)
+
+# Get a sample
+sample = dataset[0]
+obs = sample['obs']           # Dictionary with 'camera0_rgb' and 'force'
+action = sample['action']     # (T, 13) - action + force delta
+
+print(f"RGB shape: {obs['camera0_rgb'].shape}")    # (T_img, C, H, W)
+print(f"Force shape: {obs['force'].shape}")        # (T_force, 6)
+print(f"Action shape: {action.shape}")             # (T_action, 13)
+```
+
+#### Training Loop Integration
+
+```python
+import torch.nn.functional as F
+
+# In your training loop
+for batch in dataloader:
+    obs = batch['obs']
+    action_gt = batch['action']  # (B, T, 13)
+    
+    # Forward pass
+    loss_dict = policy.compute_loss(batch, return_components=True)
+    
+    # Get loss components
+    total_loss = loss_dict['loss']          # Total weighted loss
+    action_loss = loss_dict['loss_action']  # Action-only loss
+    force_loss = loss_dict['loss_force']    # Force-only loss
+    
+    # Log to wandb or tensorboard
+    logger.log({
+        'train/loss': total_loss.item(),
+        'train/action_loss': action_loss.item(),
+        'train/force_loss': force_loss.item(),
+    })
+    
+    # Backward pass
+    optimizer.zero_grad()
+    total_loss.backward()
+    optimizer.step()
+```
+
+#### Customizing the Encoder
+
+```python
+from diffusion_policy.model.vision.fadp_encoder import FADPEncoder
+
+# Create custom encoder
+encoder = FADPEncoder(
+    shape_meta={
+        'obs': {
+            'camera0_rgb': {'shape': [3, 224, 224], 'type': 'rgb'},
+            'force': {'shape': [6], 'type': 'low_dim'}
+        }
+    },
+    rgb_model_name='facebook/dinov3-vit-base-pretrain-lvd1689m',  # HuggingFace model
+    use_huggingface=True,      # Use HuggingFace Transformers
+    resize_shape=None,         # Processor handles resizing
+    force_hidden_dim=128,      # Force MLP hidden dimension
+    cross_attn_heads=8,        # Cross-attention heads
+    dropout=0.1,
+)
+
+# Forward pass
+obs_features = encoder(obs)  # (B, feature_dim)
+```
+
+### Monitoring Training with WandB
+
+The training workspace automatically logs detailed metrics:
+
+- **Loss Components**: `train_loss_action`, `train_loss_force`, `train_loss_force_weighted`
+- **Epoch Averages**: `train_avg_action_loss`, `train_avg_force_loss`
+- **Validation Metrics**: `val_loss`, `test_mean_score`
+- **Action MSE**: Position, rotation, gripper, and force errors
+
+Example WandB output:
+```
+train_loss_action: 0.0234
+train_loss_force: 0.0156
+train_loss_force_weighted: 0.0156  (force_loss_weight * force_loss)
+train_loss: 0.0390  (action_loss + force_loss_weighted)
 ```
 
 

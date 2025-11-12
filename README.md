@@ -1,6 +1,5 @@
-# Universal Manipulation Interface
+# Force-Aware Diffusion Policy
 
-A comprehensive framework for robot manipulation learning using diffusion policies. This project provides tools for converting demonstration data, training vision-based manipulation policies, and evaluating model performance.
 
 ## Overview
 
@@ -12,48 +11,24 @@ This project implements a complete pipeline for learning manipulation policies f
 4. **Evaluation**: Test trained models and visualize performance with detailed metrics
 5. **Force Prediction**: Predict future force/torque alongside actions for contact-rich tasks
 
-## Features
-
-- **Multimodal Learning**: FADP Force architecture with DINOv3 vision encoder and force sensor integration
-- **Advanced Encoder**: Bidirectional cross-attention fusion between vision (DINOv3-ViT-Base) and force features
-- **Force Prediction**: 13D output including both action (7D) and future force (6D) predictions
-- **Independent History Windows**: Separate configurable history lengths for vision and force modalities
-- **Multi-format Support**: Convert HDF5 session data to zarr format with optimized compression
-- **Vision-based Learning**: Support for RGB image inputs with efficient image processing
-- **Force/Torque Sensing**: Integration of force/torque data from robot end-effector
-- **Flexible Data Augmentation**: Per-dimension configurable pose noise for improved robustness
-- **Parallel Processing**: Multi-threaded and multi-process support for fast data conversion
-- **Comprehensive Testing**: Model evaluation with detailed visualizations and metrics
-- **Monitoring & Logging**: WandB integration with detailed loss component tracking
 
 ## Installation
 
 ### Prerequisites
 
 - Python 3.8+
+- CUDA 11.7+ (for GPU support)
 - Conda (recommended)
 
 ### Setup
 
-1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd universal_manipulation_interface
+git clone https://github.com/Elycyx/Force-Aware-Diffusion-Policy.git
+cd Force-Aware-Diffusion-Policy
+
+pip install -e .
 ```
 
-2. Create and activate conda environment:
-```bash
-conda env create -f conda_environment.yaml
-conda activate umi
-```
-
-3. Install additional dependencies (for FADP Force):
-```bash
-pip install transformers  # For DINOv3 from HuggingFace
-pip install accelerate    # For distributed training
-```
-
-**Note**: For FADP Force models, we use DINOv3 from HuggingFace Transformers instead of torch hub.
 
 ## Quick Start
 
@@ -63,15 +38,8 @@ Convert your HDF5 session data to zarr format:
 
 ```bash
 # Basic conversion
-python convert_session_to_zarr.py -i data/session_20251025_142256
+python convert_session_to_zarr.py -i data/session_xxxx
 
-# With custom options
-python convert_session_to_zarr.py \
-    -i data/session_20251025_142256 \
-    -o output/dataset.zarr.zip \
-    -s 224x224 \
-    -w 8 \
-    --fast-save
 ```
 
 **Command-line Options:**
@@ -90,12 +58,6 @@ Verify your converted dataset:
 ```bash
 # Basic inspection
 python inspect_zarr.py data/session_20251025_142256/dataset.zarr.zip
-
-# Detailed statistics
-python inspect_zarr.py data/session_20251025_142256/dataset.zarr.zip --detailed
-
-# Visualize episode length distribution
-python inspect_zarr.py data/session_20251025_142256/dataset.zarr.zip --visualize
 ```
 
 ### 3. Train a Policy
@@ -105,15 +67,7 @@ Train a diffusion policy using the converted data:
 ```bash
 # Train with FADP Force (vision + force, RECOMMENDED)
 python train.py --config-name=train_diffusion_unet_fadp_force_workspace \
-    task.dataset_path=data/session_20251025_142256/dataset.zarr.zip
 
-# Train with basic FADP (vision-only)
-python train.py --config-name=train_diffusion_unet_timm_fadp_workspace \
-    task.dataset_path=data/session_20251025_142256/dataset.zarr.zip
-
-# Train with UMI dataset (vision + proprioception)
-python train.py --config-name=train_diffusion_unet_timm_umi_workspace \
-    task.dataset_path=data/session_20251025_142256/dataset.zarr.zip
 ```
 
 ### 4. Test Trained Model
@@ -133,13 +87,6 @@ python test_fadp_model.py \
     --dataset-type train
 ```
 
-### 5. Visualize Force Data (Optional)
-
-For FADP Force models, verify force processing:
-
-```bash
-python visualize_obs_future_force.py
-```
 
 ## Data Format
 
@@ -169,92 +116,6 @@ The converted zarr file contains:
 - Handles missing force data with zero arrays
 - Validates data consistency
 
-## Dataset Types
-
-### FADP Dataset (Basic)
-
-**Force-Augmented Diffusion Policy** - Vision-only learning:
-
-- **Observation**: RGB images only (no proprioception to policy)
-- **Action**: 7D relative pose [x, y, z, rx, ry, rz, gripper] in axis-angle representation
-- **State Data**: Used internally for computing relative actions, not provided to policy
-- **Force Data**: Not used in basic version
-- **Data Augmentation**: Gaussian noise on poses during training (configurable)
-
-**Configuration**: `diffusion_policy/config/task/fadp.yaml`
-
-**Training Command**:
-```bash
-python train.py --config-name=train_diffusion_unet_timm_fadp_workspace
-```
-
-### FADP Force Dataset (Advanced, Recommended)
-
-**Force-Augmented Diffusion Policy with Force Prediction** - Multimodal learning with force/torque integration:
-
-- **Observation**: 
-  - RGB images (default: 2 history steps)
-  - Force/torque sensor data (default: 6 history steps)
-  - Independent history windows for each modality
-- **Action**: 13D output combining pose and force
-  - 7D relative pose [x, y, z, rx, ry, rz, gripper] (axis-angle)
-  - 6D relative force [fx, fy, fz, mx, my, mz] (delta from current)
-- **Model Architecture**:
-  - **Vision Encoder**: DINOv3-ViT-Base (from HuggingFace Transformers)
-  - **Force Encoder**: MLP for low-dimensional force features
-  - **Fusion**: Bidirectional Cross-Attention between vision and force tokens
-- **Loss Function**: Weighted combination of action loss and force loss
-- **Data Augmentation**: Per-dimension Gaussian noise on poses
-
-**Configuration**: `diffusion_policy/config/task/fadp_force.yaml`
-
-**Training Command**:
-```bash
-# Basic training with default settings
-python train.py --config-name=train_diffusion_unet_fadp_force_workspace \
-    task.dataset_path=data/session_20251025_142256/dataset.zarr.zip
-
-# Custom history windows
-python train.py --config-name=train_diffusion_unet_fadp_force_workspace \
-    task.dataset_path=data/session_20251025_142256/dataset.zarr.zip \
-    task.img_obs_horizon=3 \
-    task.force_obs_horizon=8
-
-# Custom force loss weight
-python train.py --config-name=train_diffusion_unet_fadp_force_workspace \
-    task.dataset_path=data/session_20251025_142256/dataset.zarr.zip \
-    policy.force_loss_weight=0.5
-```
-
-**Testing Command**:
-```bash
-# Test on validation set (default)
-python test_fadp_model.py \
-    --checkpoint data/outputs/<experiment>/checkpoints/latest.ckpt \
-    --dataset-path data/session_20251025_142256/dataset.zarr.zip
-
-# Test on training set
-python test_fadp_model.py \
-    --checkpoint data/outputs/<experiment>/checkpoints/latest.ckpt \
-    --dataset-path data/session_20251025_142256/dataset.zarr.zip \
-    --dataset-type train
-```
-
-### UMI Dataset
-
-**Universal Manipulation Interface** - Full observation learning:
-
-- **Observation**: RGB images + proprioceptive state (position, rotation, gripper)
-- **Action**: 7D or 10D depending on rotation representation
-- **State Data**: Provided to policy as low-dimensional observations
-- **Force Data**: Available optionally
-
-**Configuration**: `diffusion_policy/config/task/umi.yaml`
-
-**Training Command**:
-```bash
-python train.py --config-name=train_diffusion_unet_timm_umi_workspace
-```
 
 ## Configuration
 
@@ -307,94 +168,6 @@ dinov3_model: facebook/dinov3-vit-base-pretrain-lvd1689m  # HuggingFace model na
 
 **Configuration file**: `diffusion_policy/config/task/fadp_force.yaml`
 
-## Performance Optimization
-
-### Fast Data Conversion
-
-The conversion script supports several optimization options:
-
-1. **Multi-threading**: Parallel image resizing within each episode
-   ```bash
-   python convert_session_to_zarr.py -i <input> -w 8
-   ```
-
-2. **Multi-processing**: Parallel episode processing (faster but uses more memory)
-   ```bash
-   python convert_session_to_zarr.py -i <input> -w 8 --use-multiprocessing
-   ```
-
-3. **Fast Save**: Reduced compression for faster saving (larger files)
-   ```bash
-   python convert_session_to_zarr.py -i <input> --fast-save
-   ```
-
-### Compression Settings
-
-- **Default**: LZ4 compression (level 3) - balanced speed and file size
-- **Fast Save**: LZ4 compression (level 1) - fastest, largest files
-- **Custom**: Modify compression settings in `convert_session_to_zarr.py`
-
-## Utilities
-
-### Data Inspection
-
-**inspect_zarr.py**: Inspect zarr dataset files
-```bash
-python inspect_zarr.py <dataset.zarr.zip> [options]
-```
-
-**inspect_fadp_dataset.py**: Inspect FADP dataset after loading
-```bash
-python inspect_fadp_dataset.py --dataset-path <dataset.zarr.zip>
-```
-
-### Model Testing
-
-**test_fadp_model.py**: Test trained FADP models (supports both 7D and 13D outputs)
-```bash
-# Test on validation set
-python test_fadp_model.py \
-    --checkpoint <checkpoint_path> \
-    --dataset-path <dataset.zarr.zip> \
-    --output-dir <output_dir>
-
-# Test on training set
-python test_fadp_model.py \
-    --checkpoint <checkpoint_path> \
-    --dataset-path <dataset.zarr.zip> \
-    --dataset-type train \
-    --output-dir <output_dir>
-
-# Test specific number of samples
-python test_fadp_model.py \
-    --checkpoint <checkpoint_path> \
-    --dataset-path <dataset.zarr.zip> \
-    --num-samples 10
-```
-
-**Output Visualizations**:
-- Action trajectory plots (7 or 13 dimensions)
-- Error distribution histograms
-- Per-dimension error analysis
-- Force prediction plots (for FADP Force models)
-
-### Force Data Visualization
-
-**visualize_obs_future_force.py**: Visualize force observations and predictions
-```bash
-python visualize_obs_future_force.py
-```
-
-**Features**:
-- Compare historical force observations (6 steps) vs future predictions (16 steps)
-- Verify force data continuity and alignment
-- Analyze force delta (relative) vs absolute values
-- Generate detailed comparison plots for multiple samples
-
-**Output**:
-- `force_obs_future_comparison_sample_X.png`: Detailed force visualization
-- Terminal statistics: force ranges, trends, and continuity checks
-
 ## Project Structure
 
 ```
@@ -431,68 +204,9 @@ universal_manipulation_interface/
     └── session_*/                      # Session data directories
 ```
 
-## Troubleshooting
-
-### Common Issues
-
-1. **Memory Error During Conversion**
-   - Use `-n` to limit episodes: `python convert_session_to_zarr.py -i <input> -n 10`
-   - Reduce `-w` (number of workers)
-   - Disable `--use-multiprocessing`
-
-2. **ModuleNotFoundError**
-   - Ensure conda environment is activated: `conda activate umi`
-   - Check all dependencies are installed
-
-3. **Force Data Missing**
-   - The script automatically fills missing force data with zeros
-   - Check warnings in conversion output
-
-4. **Slow Conversion**
-   - Enable `--fast-save` for faster saving
-   - Use `--use-multiprocessing` with multiple workers
-   - Increase `-w` for more parallel processing
-
-5. **Dataset Verification**
-   - Use `inspect_zarr.py` to verify converted data
-   - Check episode counts and data shapes match expectations
-
-## Advanced Usage
-
-### Custom Image Sizes
-
-Resize images for different model architectures:
-
-```bash
-# For ViT models (224x224)
-python convert_session_to_zarr.py -i <input> -s 224x224
-
-# For larger models (256x256)
-python convert_session_to_zarr.py -i <input> -s 256x256
-```
-
-### Partial Dataset Conversion
-
-Convert a subset for testing:
-
-```bash
-# Convert first 10 episodes
-python convert_session_to_zarr.py -i <input> -n 10
-```
-
-### Batch Processing
-
-Process multiple sessions:
-
-```bash
-for session in data/session_*/; do
-    python convert_session_to_zarr.py -i "$session" --fast-save
-done
-```
-
 ## Code Usage Examples
 
-### Using FADP Force in Your Code
+### Using FADP in Your Code
 
 #### Loading a Trained Model
 

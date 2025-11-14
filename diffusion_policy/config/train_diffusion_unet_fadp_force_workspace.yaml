@@ -74,7 +74,7 @@ policy:
   cond_predict_scale: True
   input_pertub: 0.1
   train_diffusion_n_samples: 1
-  force_loss_weight: 0.5  # 力预测loss的权重（相对于action loss）
+  force_loss_weight: 1.0  # 力预测loss的权重（相对于action loss）
 
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel

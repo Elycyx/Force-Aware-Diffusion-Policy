@@ -84,6 +84,8 @@ setup(
             'fadp-convert=convert_session_to_zarr:main',
             'fadp-test=test_fadp_model:main',
             'fadp-inspect=inspect_zarr:main',
+            'fadp-eval-openloop=open_loop_evaluation:main',
+            'fadp-analyze-ckpts=analyze_checkpoints:main',
         ],
     },
     include_package_data=True,

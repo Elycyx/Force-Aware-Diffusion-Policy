@@ -87,6 +87,101 @@ python test_fadp_model.py \
     --dataset-type train
 ```
 
+### 5. Open-Loop Evaluation with Video
+
+Test model on complete episodes and generate visualization videos:
+
+```bash
+# Basic usage
+python open_loop_evaluation.py \
+    --checkpoint data/outputs/<experiment>/checkpoints/latest.ckpt \
+    --dataset-path data/session_20251025_142256/dataset.zarr.zip \
+    --episode-idx 0 \
+    --output-path episode_0_test.mp4
+
+# With action chunking (推理一次执行8步，更接近真实部署)
+python open_loop_evaluation.py \
+    -c checkpoints/latest.ckpt \
+    -d data/dataset.zarr.zip \
+    -e 0 \
+    -o episode_0.mp4 \
+    --action-chunk-size 8 \
+    --fps 10
+```
+
+**Key Features**:
+- **Action Chunking**: 推理一次执行多步（默认8步），完全模拟真实部署情况
+- **绝对轨迹对比**: 正确累加相对action得到绝对轨迹，符合chunking语义
+- **全面可视化** (Matplotlib高质量渲染):
+  - **7个action维度**：x, y, z, rx, ry, rz, gripper 独立显示
+  - **6个force维度** (13D模型)：fx, fy, fz (线性力) + mx, my, mz (角力矩)
+  - **误差分析**：逐维度绝对误差、累积误差
+  - **实时统计**：当前帧误差、平均误差、总误差
+  - **RGB图像**：显示当前观测帧
+- **详细统计输出**: 各维度MAE、RMSE独立报告
+
+**参数说明**:
+- `--action-chunk-size`: Action chunking大小（默认8），控制推理频率
+- `--fps`: 视频帧率（默认10）
+
+**可视化布局**:
+
+无Force (3行×4列):
+```
+[RGB 图像]  [Pos X]  [Pos Y]  [Pos Z]
+[RGB 图像]  [Rot RX] [Rot RY] [Rot RZ]
+[Gripper]   [Error]  [Cum.Err][Stats]
+```
+
+有Force (5行×4列):
+```
+[RGB 图像]  [Pos X]  [Pos Y]  [Pos Z]
+[RGB 图像]  [Rot RX] [Rot RY] [Rot RZ]
+[Gripper]   [Error]  [Cum.Err][Stats]
+[Force FX]  [Force FY] [Force FZ] [F.Linear Err]
+[Torque MX] [Torque MY][Torque MZ][F.Angular Err]
+```
+
+### 6. Checkpoint Performance Analysis
+
+Analyze and compare performance trends across multiple checkpoints:
+
+```bash
+# Analyze all checkpoints in a directory
+python analyze_checkpoints.py \
+    --checkpoint-dir data/outputs/<experiment>/checkpoints
+```
+
+**Features**:
+- **自动扫描**: 自动查找目录下所有checkpoint文件（支持多种命名格式）
+- **批量测试**: 对每个checkpoint进行完整评估
+- **趋势可视化**: 生成多种趋势图，包括:
+  - 整体指标趋势 (MSE, MAE, RMSE)
+  - 分组件趋势 (Position, Rotation, Gripper, Force)
+  - L2误差趋势
+- **最佳模型识别**: 自动标记每个指标的最佳epoch
+- **详细报告**: 保存JSON格式的详细结果
+
+**输出文件**:
+- `overall_trends.png`: 整体MSE/MAE/RMSE随epoch变化
+- `component_trends.png`: 各组件MSE随epoch变化
+- `l2_error_trends.png`: L2误差随epoch变化
+- `detailed_results.json`: 所有checkpoint的详细指标数据
+
+**参数说明**:
+- `-d, --checkpoint-dir`: Checkpoint文件夹路径 (必需)
+- `-n, --num-samples`: 每个checkpoint的测试样本数量 (默认: 全部)
+- `-b, --batch-size`: Batch大小 (默认: 16)
+- `--device`: 设备 (默认: cuda:0)
+- `-s, --save-dir`: 结果保存目录 (默认: checkpoint_analysis)
+- `--use-train-set`: 使用训练集而不是验证集
+
+**使用场景**:
+- 选择最佳checkpoint用于部署
+- 分析训练过程中的性能变化
+- 检测过拟合或欠拟合
+- 比较不同训练阶段的模型表现
+
 
 ## Data Format
 
@@ -175,9 +270,12 @@ universal_manipulation_interface/
 ├── convert_session_to_zarr.py         # Data conversion script
 ├── train.py                            # Training script
 ├── test_fadp_model.py                 # Model testing script (7D/13D support)
+├── open_loop_evaluation.py            # Open-loop testing with video output
+├── analyze_checkpoints.py             # Checkpoint performance analysis tool
 ├── inspect_zarr.py                     # Zarr inspection utility
 ├── inspect_fadp_dataset.py            # FADP dataset inspection
 ├── visualize_obs_future_force.py      # Force data visualization
+├── setup.py                            # Package installation script
 ├── diffusion_policy/                   # Core diffusion policy framework
 │   ├── config/                         # Training configurations
 │   │   ├── task/

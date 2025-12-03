@@ -291,7 +291,7 @@ def test_model(policy, dataset, device, num_samples=None, batch_size=16):
         for batch_idx, batch in enumerate(tqdm(dataloader, desc="测试中")):
             # 移动到设备
             batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
-            
+            # print(batch['obs'])
             # 预测
             result = policy.predict_action(batch['obs'])
             pred_action = result['action_pred']  # (B, T, D)
@@ -394,6 +394,12 @@ def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
     N, T, D = pred_actions.shape
     num_vis = min(num_vis, N)
     
+    # 随机选择样本索引
+    np.random.seed()  # 使用当前时间作为随机种子
+    sample_indices = np.random.choice(N, size=num_vis, replace=False)
+    sample_indices.sort()  # 排序以便查看
+    print(f"随机选择的样本索引: {sample_indices}")
+    
     # 检测action维度
     has_force = False
     if D % 13 == 0:
@@ -411,7 +417,7 @@ def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
         n_robots = 1
     
     # 1. 绘制action轨迹对比
-    for sample_idx in range(num_vis):
+    for vis_idx, sample_idx in enumerate(sample_indices):
         # 根据是否有force调整子图数量
         n_rows = 4 if has_force else 3
         fig, axes = plt.subplots(n_rows, n_robots, figsize=(6*n_robots, 4*n_rows))
@@ -495,8 +501,9 @@ def visualize_action_comparison(results, save_dir='test_results', num_vis=5):
                 axes[3, robot_id].grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(f'{save_dir}/action_trajectory_sample_{sample_idx}.png', dpi=150)
+        plt.savefig(f'{save_dir}/action_trajectory_sample_{vis_idx}_idx{sample_idx}.png', dpi=150)
         plt.close()
+        print(f"  已保存样本 {sample_idx} 的可视化结果")
     
     # 2. Plot error distribution
     errors = pred_actions - gt_actions

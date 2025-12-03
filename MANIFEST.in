@@ -1,0 +1,25 @@
+# MANIFEST.in - Package data inclusion rules
+
+# Include README and license
+include README.md
+include LICENSE
+
+# Include configuration files
+recursive-include diffusion_policy/config *.yaml
+recursive-include diffusion_policy/config *.yml
+
+# Include documentation
+recursive-include docs *.md
+recursive-include docs *.rst
+
+# Exclude unnecessary files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude __pycache__
+global-exclude .DS_Store
+global-exclude *.so
+global-exclude .git*
+
+# Exclude data and outputs
+prune data
+prune outputs

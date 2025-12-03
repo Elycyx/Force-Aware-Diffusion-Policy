@@ -121,6 +121,10 @@ class TrainDiffusionUnetFADPWorkspace(BaseWorkspace):
 
         # configure dataset
         dataset: BaseImageDataset
+        if accelerator.is_main_process:
+            print(f"\n{'='*60}")
+            print(f"Dataset: {cfg.task.dataset.dataset_path}")
+            print(f"{'='*60}\n")
         dataset = hydra.utils.instantiate(cfg.task.dataset)
         assert isinstance(dataset, BaseImageDataset) or isinstance(dataset, BaseDataset)
         train_dataloader = DataLoader(dataset, **cfg.dataloader)

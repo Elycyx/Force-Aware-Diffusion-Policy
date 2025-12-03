@@ -32,12 +32,27 @@ logger = logging.getLogger(__name__)
 
 
 class ForceMLP(nn.Module):
-    """MLP encoder for force sensor data"""
+    """
+    MLP encoder for force sensor data
+    
+    Architecture optimizations:
+    1. GELU activation: Force/torque signals contain positive and negative values.
+       ReLU has zero gradient for negative inputs, causing "dead neurons" and poor
+       fitting for negative changes. GELU is smooth, efficient, and performs well
+       in modern encoders (like Transformers).
+       
+    2. Post-Normalization: LayerNorm is applied after activation and dropout.
+       This ordering (Post-Normalization) is proven to be more stable and 
+       converges faster in deep networks and Transformer architectures.
+       
+       Original: Linear -> LayerNorm -> ReLU -> Dropout
+       Optimized: Linear -> GELU -> Dropout -> LayerNorm
+    """
     def __init__(
         self, 
         input_dim: int, 
         hidden_dim: int = 256,
-        output_dim: int = 768,  # Match DINOv2 ViT-B/16 feature dim
+        output_dim: int = 768,  # Match DINOv3 ViT-B/16 feature dim
         num_layers: int = 3,
         dropout: float = 0.1
     ):
@@ -47,15 +62,16 @@ class ForceMLP(nn.Module):
         current_dim = input_dim
         
         for i in range(num_layers - 1):
+            # Optimized ordering: Linear -> GELU -> Dropout -> LayerNorm
             layers.extend([
                 nn.Linear(current_dim, hidden_dim),
-                nn.LayerNorm(hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout)
+                nn.GELU(),  # GELU instead of ReLU for better handling of negative values
+                nn.Dropout(dropout),
+                nn.LayerNorm(hidden_dim)  # Post-normalization for better stability
             ])
             current_dim = hidden_dim
         
-        # Final layer to output_dim
+        # Final layer to output_dim (no activation, just linear projection + normalization)
         layers.append(nn.Linear(current_dim, output_dim))
         layers.append(nn.LayerNorm(output_dim))
         

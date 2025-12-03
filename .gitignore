@@ -178,3 +178,5 @@ test_results_val/
 *.png
 
 models
+
+checkpoint_analysis_val

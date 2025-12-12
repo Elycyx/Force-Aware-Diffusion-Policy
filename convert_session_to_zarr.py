@@ -70,6 +70,8 @@ def load_episode_hdf5(file_path, target_image_shape=(224, 224), num_workers=4):
         action[0, 5] -= np.pi / 2
         if len(action) > 1:
             action[1:, 5] -= np.pi
+        # 将action的x和y坐标取反
+        action[:, 0:2] *= -1
         # make state the same as action
         state = action.copy()
         

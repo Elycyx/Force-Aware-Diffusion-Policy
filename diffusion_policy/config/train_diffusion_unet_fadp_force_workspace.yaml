@@ -50,7 +50,7 @@ policy:
     #   facebook/dinov3-convnext-base-pretrain-lvd1689m
     #   facebook/dinov3-convnext-large-pretrain-lvd1689m
     dinov3_model: '/mnt/lx/cyx/universal_manipulation_interface/models/dinov3-vitb16-pretrain-lvd1689m'
-    dinov3_frozen: True  # 设置为True以冻结DINOv3权重
+    dinov3_frozen: False  # 设置为True以冻结DINOv3权重
     use_huggingface: True  # 使用HuggingFace transformers (推荐)
     
     # Force MLP encoder settings
@@ -58,8 +58,8 @@ policy:
     force_mlp_layers: 2
     
     # Cross attention settings
-    num_attention_heads: 8
-    attention_dropout: 0.2
+    num_attention_heads: 6
+    attention_dropout: 0.1
     
     # Data augmentation transforms (仅在use_huggingface=False时生效)
     # HuggingFace会使用自己的image processor
@@ -74,7 +74,7 @@ policy:
   cond_predict_scale: True
   input_pertub: 0.1
   train_diffusion_n_samples: 1
-  force_loss_weight: 0.2  # 力预测loss的权重（相对于action loss）
+  force_loss_weight: 1.0  # 力预测loss的权重（相对于action loss）
 
 ema:
   _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
@@ -113,15 +113,15 @@ training:
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 2000
-  num_epochs: 400
+  num_epochs: 1000
   gradient_accumulate_every: 1
   # EMA destroys performance when used with BatchNorm
   # replace BatchNorm with GroupNorm.
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 10
-  checkpoint_every: 10
+  rollout_every: 20
+  checkpoint_every: 20
   val_every: 1
   sample_every: 5
   # steps per epoch
@@ -143,7 +143,7 @@ checkpoint:
   topk:
     monitor_key: val_loss
     mode: min
-    k: 40
+    k: 50
     format_str: 'epoch={epoch:04d}-val_loss={val_loss:.3f}.ckpt'
   save_last_ckpt: True
   save_last_snapshot: False

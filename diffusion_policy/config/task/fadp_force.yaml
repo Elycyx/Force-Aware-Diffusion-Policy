@@ -2,9 +2,9 @@ name: fadp_force
 
 # 观测和动作的时间窗口
 img_obs_horizon: 2      # RGB图像历史窗口（默认2帧）
-force_obs_horizon: 2    # 力传感器历史窗口（默认6帧，捕捉力的变化趋势）
+force_obs_horizon: 4    # 力传感器历史窗口（默认6帧，捕捉力的变化趋势）
 action_horizon: 16
-obs_down_sample_steps: 3
+obs_down_sample_steps: 1
 
 shape_meta: &shape_meta
   # 观测数据
@@ -60,7 +60,7 @@ shape_meta: &shape_meta
     rotation_rep: axis_angle_with_force  # 扩展的表示，包含力
 
 task_name: &task_name fadp_force
-dataset_path: data/session_20251202_170443/dataset.zarr.zip
+dataset_path: data/basin_noup/dataset.zarr.zip
 
 pose_repr: &pose_repr
   obs_pose_repr: relative

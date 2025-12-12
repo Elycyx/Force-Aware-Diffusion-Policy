@@ -72,14 +72,19 @@ def load_episode_hdf5(file_path, target_image_shape=(224, 224), num_workers=4):
             action[1:, 5] -= np.pi
         # 将action的x和y坐标取反
         action[:, 0:2] *= -1
-        # make state the same as action
-        state = action.copy()
         
-        n_steps = state.shape[0]
+        # state使用当前action，action往后移一步
+        # state[t]对应原始action[t]，action[t]对应原始action[t+1]
+        state = action[:-1].copy()  # 去掉最后一个，因为最后一个state没有对应的下一步action
+        action = action[1:].copy()  # 从第二个开始，表示从state[t]采取的动作
+        image = image[:-1]  # image也去掉最后一帧，与state对齐
+        
+        n_steps = state.shape[0]  # 现在比原始数据少1个时间步
         
         # 读取force数据（如果存在）
         if 'force' in f:
             force = f['force'][:].astype(np.float32)  # (T, 6)
+            force = force[:-1]  # force也去掉最后一个，与state对齐
             # 确保force长度与state一致
             if force.shape[0] != n_steps:
                 print(f"警告: {pathlib.Path(file_path).name} 中force数据长度({force.shape[0]})与state({n_steps})不一致，截断或填充")

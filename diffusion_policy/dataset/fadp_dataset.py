@@ -559,7 +559,7 @@ class FadpDataset(BaseDataset):
             action_pose_mat = convert_pose_mat_rep(
                 action_mat,  # 目标位姿
                 base_pose_mat=pose_mat[-1],  # 参考位姿（最后一个时刻）
-                pose_rep=self.obs_pose_repr,  # 'relative'
+                pose_rep='relative',  # 'relative'
                 backward=False
             )  # (T, 4, 4)
             

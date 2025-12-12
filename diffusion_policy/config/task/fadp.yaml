@@ -27,7 +27,7 @@ shape_meta: &shape_meta
       type: low_dim
       ignore_by_policy: True  # 不输出给policy
     robot0_eef_rot_axis_angle:
-      shape: [3]
+      shape: [3]  # 实际存储的是欧拉角 (roll, pitch, yaw)，字段名保留兼容性
       horizon: ${img_obs_horizon}
       latency_steps: 0
       down_sample_steps: ${obs_down_sample_steps}
@@ -42,11 +42,11 @@ shape_meta: &shape_meta
       ignore_by_policy: True  # 不输出给policy
   
   action: 
-    shape: [7]  # [x, y, z, rx, ry, rz, gripper] - axis-angle表示
+    shape: [7]  # [x, y, z, rx, ry, rz, gripper] - 欧拉角表示 (roll, pitch, yaw)
     horizon: ${action_horizon}
     latency_steps: 0
     down_sample_steps: ${obs_down_sample_steps}
-    rotation_rep: axis_angle  # 保持原始的axis-angle表示
+    rotation_rep: euler_xyz  # 欧拉角表示 (xyz顺序，即roll, pitch, yaw)
 
 task_name: &task_name fadp
 dataset_path: data/session_20251025_142256/dataset.zarr.zip
@@ -71,7 +71,7 @@ dataset:
   seed: 42
   val_ratio: 0.05
   # 数据增强：对位姿添加高斯噪声（标准差）
-  # 分别对应 [x, y, z, rx, ry, rz] 的标准差
+  # 分别对应 [x, y, z, roll, pitch, yaw] 的标准差
   # 也可以使用单个值，所有维度使用相同标准差，例如: pose_noise_scale: 0.05
   pose_noise_scale: [0.0001, 0.0001, 0.0001, 0.001, 0.001, 0.001]
 

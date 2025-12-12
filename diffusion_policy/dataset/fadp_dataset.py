@@ -33,7 +33,7 @@ def pose_to_mat(pose):
     
     Args:
         pose: (..., 6) numpy array [x, y, z, rx, ry, rz] 
-              其中 (rx, ry, rz) 是axis-angle表示的旋转向量
+              其中 (rx, ry, rz) 是欧拉角表示 (roll, pitch, yaw)，单位：弧度
     
     Returns:
         mat: (..., 4, 4) 齐次变换矩阵
@@ -55,14 +55,14 @@ def pose_to_mat(pose):
     
     # 分离位置和旋转
     pos = pose[:, :3]  # (N, 3)
-    rotvec = pose[:, 3:6]  # (N, 3) axis-angle
+    euler = pose[:, 3:6]  # (N, 3) 欧拉角 (roll, pitch, yaw)
     
     # 初始化变换矩阵
     mat = np.zeros((batch_size, 4, 4), dtype=np.float32)
     
-    # 设置旋转部分
+    # 设置旋转部分 - 使用欧拉角 (xyz顺序，即roll, pitch, yaw)
     for i in range(batch_size):
-        rot = R.from_rotvec(rotvec[i])
+        rot = R.from_euler('xyz', euler[i], degrees=False)
         mat[i, :3, :3] = rot.as_matrix()
     
     # 设置平移部分
@@ -83,7 +83,7 @@ class FadpDataset(BaseDataset):
     
     数据格式:
     - camera0_rgb: RGB图像 (T, H, W, 3)
-    - action: 动作 (T, 7) - [x, y, z, rx, ry, rz, gripper] (相对pose)
+    - action: 动作 (T, 7) - [x, y, z, rx, ry, rz, gripper] (相对pose，旋转使用欧拉角 roll, pitch, yaw)
     
     注意：虽然不输出state观测，但会使用state数据来计算相对action
     """
@@ -291,12 +291,12 @@ class FadpDataset(BaseDataset):
         对于action (可能是7维或13维):
         - 7维格式: [x, y, z, rx, ry, rz, gripper]
           - 前3维 (x,y,z): 使用range normalization
-          - 中3维 (rx,ry,rz): 使用identity normalization (axis-angle)
+          - 中3维 (rx,ry,rz): 使用identity normalization (欧拉角 roll, pitch, yaw)
           - 最后1维 (gripper): 使用range normalization
         
         - 13维格式: [x, y, z, rx, ry, rz, gripper, fx, fy, fz, mx, my, mz]
           - 前3维 (x,y,z): 使用range normalization
-          - 中3维 (rx,ry,rz): 使用identity normalization (axis-angle)
+          - 中3维 (rx,ry,rz): 使用identity normalization (欧拉角 roll, pitch, yaw)
           - 第7维 (gripper): 使用range normalization
           - 后6维 (fx, fy, fz, mx, my, mz): 使用range normalization
         
@@ -363,7 +363,7 @@ class FadpDataset(BaseDataset):
                 )
             )
             
-            # 旋转 (3维 axis-angle) - identity normalization
+            # 旋转 (3维 欧拉角 roll, pitch, yaw) - identity normalization
             action_normalizers.append(
                 get_identity_normalizer_from_stat(
                     array_to_stats(action_data[..., start_idx + 3: start_idx + 6])
@@ -516,7 +516,7 @@ class FadpDataset(BaseDataset):
         # 4. 提取相对位姿：
         #    从T_relative中提取平移和旋转，得到相对action
         #    - 相对位置: T_relative的平移部分
-        #    - 相对旋转: T_relative的旋转部分（转换为axis-angle）
+        #    - 相对旋转: T_relative的旋转部分（转换为欧拉角 roll, pitch, yaw）
         # 
         # 5. 数据增强（可选）：
         #    在当前位姿上添加噪声，增强模型的鲁棒性
@@ -530,12 +530,12 @@ class FadpDataset(BaseDataset):
             # 步骤1: 构建当前位姿矩阵 (T, 4, 4)
             current_pose = np.concatenate([
                 state_dict[f'robot{robot_id}_eef_pos'],
-                state_dict[f'robot{robot_id}_eef_rot_axis_angle']
-            ], axis=-1)  # (T, 6)
+                state_dict[f'robot{robot_id}_eef_rot_axis_angle']  # 实际是欧拉角 (roll, pitch, yaw)
+            ], axis=-1)  # (T, 6) - [x, y, z, roll, pitch, yaw]
             
             # 数据增强: 在当前位姿上添加噪声（仅训练集）
             # 参考umi_dataset.py中的做法，对位姿的每个维度分别添加高斯噪声
-            # self.pose_noise_scale 是6个值的数组：[x, y, z, rx, ry, rz] 的标准差
+            # self.pose_noise_scale 是6个值的数组：[x, y, z, roll, pitch, yaw] 的标准差
             if np.any(self.pose_noise_scale > 0):
                 # 对每个维度分别生成噪声
                 noise = np.zeros_like(current_pose)
@@ -550,7 +550,7 @@ class FadpDataset(BaseDataset):
             pose_mat = pose_to_mat(current_pose)  # (T, 4, 4)
             
             # 步骤2: 构建目标位姿矩阵 (T, 4, 4)
-            target_pose = data['action'][..., 7 * robot_id: 7 * robot_id + 6]  # (T, 6)
+            target_pose = data['action'][..., 7 * robot_id: 7 * robot_id + 6]  # (T, 6) - [x, y, z, roll, pitch, yaw]
             action_mat = pose_to_mat(target_pose)  # (T, 4, 4)
             
             # 步骤3: 计算相对变换
@@ -567,13 +567,13 @@ class FadpDataset(BaseDataset):
             T = action_pose_mat.shape[0]
             action_pos = action_pose_mat[:, :3, 3]  # (T, 3) 相对位置
             
-            # 提取旋转矩阵并转换为axis-angle
+            # 提取旋转矩阵并转换为欧拉角 (roll, pitch, yaw)
             action_rot_list = []
             for t in range(T):
                 rot_mat = action_pose_mat[t, :3, :3]
                 rot = R.from_matrix(rot_mat)
-                rotvec = rot.as_rotvec()  # axis-angle表示
-                action_rot_list.append(rotvec)
+                euler = rot.as_euler('xyz', degrees=False)  # 欧拉角表示 (roll, pitch, yaw)，单位：弧度
+                action_rot_list.append(euler)
             action_rot = np.stack(action_rot_list, axis=0)  # (T, 3)
             
             # 提取gripper（保持不变）

@@ -460,6 +460,16 @@ class FADPEncoder(ModuleAttrMixin):
             assert B == batch_size
             assert img.shape[2:] == self.key_shape_map[key]
             
+            # 验证输入数据类型和数值范围
+            assert img.dtype == torch.float32, (
+                f"Expected image dtype to be torch.float32, but got {img.dtype}. "
+                f"Please convert your image to float32 by calling .float() or torch.float32."
+            )
+            assert img.min() >= 0.0 and img.max() <= 1.0, (
+                f"Expected image values to be in range [0, 1], but got [{img.min():.4f}, {img.max():.4f}]. "
+                f"If your image is in [0, 255] range, divide by 255.0 first."
+            )
+            
             # Reshape to (B*T, C, H, W)
             img = img.reshape(B * T, *img.shape[2:])
             

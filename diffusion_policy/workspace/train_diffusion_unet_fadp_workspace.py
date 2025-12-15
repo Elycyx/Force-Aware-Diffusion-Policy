@@ -60,30 +60,88 @@ class TrainDiffusionUnetFADPWorkspace(BaseWorkspace):
         if cfg.training.use_ema:
             self.ema_model = copy.deepcopy(self.model)
 
-        # configure optimizer with separate learning rates for encoder and model
-        obs_encoder_lr = cfg.optimizer.lr
+        # configure optimizer with separate learning rates for different components
+        base_lr = cfg.optimizer.lr
+        dinov3_lr = base_lr * 0.1  # DINOv3预训练权重用小学习率微调
         
-        # Check if dinov3_frozen field exists and adjust lr accordingly
-        # For frozen encoders, we reduce the learning rate
+        # 统计参数数量
+        total_encoder_params = sum(p.numel() for p in self.model.obs_encoder.parameters())
+        trainable_encoder_params = sum(p.numel() for p in self.model.obs_encoder.parameters() if p.requires_grad)
+        
+        # 检查 dinov3_frozen 状态
+        is_frozen = False
         if hasattr(cfg.policy.obs_encoder, 'dinov3_frozen'):
-            if cfg.policy.obs_encoder.dinov3_frozen:
-                obs_encoder_lr *= 0.1
-                print('==> DINOv3 encoder is frozen, reducing lr to', obs_encoder_lr)
-            else:
-                print('==> DINOv3 encoder is trainable')
+            is_frozen = cfg.policy.obs_encoder.dinov3_frozen
         
-        # Collect encoder parameters
-        obs_encoder_params = list()
-        for param in self.model.obs_encoder.parameters():
-            if param.requires_grad:
-                obs_encoder_params.append(param)
-        print(f'obs_encoder params: {len(obs_encoder_params)}')
+        print(f'\n{"="*60}')
+        print(f'Optimizer 配置:')
+        print(f'  Encoder总参数: {total_encoder_params:,}')
+        print(f'  Encoder可训练参数: {trainable_encoder_params:,}')
+        
+        # 分别收集不同部分的参数
+        # 1. DINOv3 参数
+        dinov3_params = []
+        if hasattr(self.model.obs_encoder, 'dinov3'):
+            dinov3_params = [p for p in self.model.obs_encoder.dinov3.parameters() if p.requires_grad]
+        
+        # 2. Force MLP 和 Cross Attention 参数
+        force_mlp_params = []
+        cross_attn_params = []
+        if hasattr(self.model.obs_encoder, 'force_encoder') and self.model.obs_encoder.force_encoder is not None:
+            force_mlp_params = [p for p in self.model.obs_encoder.force_encoder.parameters() if p.requires_grad]
+        if hasattr(self.model.obs_encoder, 'cross_attention') and self.model.obs_encoder.cross_attention is not None:
+            cross_attn_params = [p for p in self.model.obs_encoder.cross_attention.parameters() if p.requires_grad]
+        
+        # 3. 其他 encoder 参数（如果有）
+        encoder_param_ids = set(id(p) for p in dinov3_params + force_mlp_params + cross_attn_params)
+        other_encoder_params = [p for p in self.model.obs_encoder.parameters() 
+                               if p.requires_grad and id(p) not in encoder_param_ids]
+        
+        # 打印各部分参数统计
+        if is_frozen:
+            print(f'  DINOv3: FROZEN (不训练)')
+            print(f'    - 参数数量: {sum(p.numel() for p in self.model.obs_encoder.dinov3.parameters()):,}')
+        else:
+            print(f'  DINOv3: TRAINABLE (微调预训练权重)')
+            print(f'    - 参数数量: {sum(p.numel() for p in dinov3_params):,}')
+            print(f'    - 学习率: {dinov3_lr:.2e} (base_lr * 0.1)')
+        
+        if len(force_mlp_params) > 0:
+            print(f'  Force MLP: TRAINABLE (从头训练)')
+            print(f'    - 参数数量: {sum(p.numel() for p in force_mlp_params):,}')
+            print(f'    - 学习率: {base_lr:.2e} (base_lr)')
+        
+        if len(cross_attn_params) > 0:
+            print(f'  Cross Attention: TRAINABLE (从头训练)')
+            print(f'    - 参数数量: {sum(p.numel() for p in cross_attn_params):,}')
+            print(f'    - 学习率: {base_lr:.2e} (base_lr)')
+        
+        if len(other_encoder_params) > 0:
+            print(f'  其他Encoder参数: {sum(p.numel() for p in other_encoder_params):,}')
+        
+        print(f'  Diffusion Model: TRAINABLE')
+        print(f'    - 学习率: {base_lr:.2e} (base_lr)')
+        print(f'{"="*60}\n')
         
         # Setup parameter groups with different learning rates
         param_groups = [
-            {'params': self.model.model.parameters()},
-            {'params': obs_encoder_params, 'lr': obs_encoder_lr}
+            # Diffusion model主体: base_lr
+            {'params': self.model.model.parameters(), 'lr': base_lr},
         ]
+        
+        # DINOv3: 如果可训练，用小学习率微调
+        if len(dinov3_params) > 0:
+            param_groups.append({'params': dinov3_params, 'lr': dinov3_lr})
+        
+        # Force MLP和Cross Attention: 用base_lr从头训练
+        if len(force_mlp_params) > 0:
+            param_groups.append({'params': force_mlp_params, 'lr': base_lr})
+        if len(cross_attn_params) > 0:
+            param_groups.append({'params': cross_attn_params, 'lr': base_lr})
+        
+        # 其他encoder参数
+        if len(other_encoder_params) > 0:
+            param_groups.append({'params': other_encoder_params, 'lr': base_lr})
         
         optimizer_cfg = OmegaConf.to_container(cfg.optimizer, resolve=True)
         optimizer_cfg.pop('_target_')

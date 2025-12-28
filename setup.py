@@ -17,7 +17,7 @@ def read_long_description():
 INSTALL_REQUIRES = [
     'torch>=2.0.0',
     'torchvision>=0.15.0',
-    'numpy>=1.20.0',
+    'numpy>=1.20.0,<2',  # DA3 requires numpy<2
     'scipy>=1.7.0',
     'zarr>=2.10.0',
     'numcodecs>=0.10.0',
@@ -38,6 +38,13 @@ INSTALL_REQUIRES = [
     'accelerate>=0.20.0',
     'transformers>=4.30.0',
     'timm>=0.9.0',
+    # Depth Anything 3 dependencies
+    'huggingface_hub',
+    'addict',
+    'trimesh',
+    'imageio',
+    'safetensors',
+    'xformers',  # For efficient attention (optional but recommended)
 ]
 
 # Optional dependencies for specific features
@@ -52,6 +59,21 @@ EXTRAS_REQUIRE = {
     'docs': [
         'sphinx>=4.0.0',
         'sphinx-rtd-theme>=1.0.0',
+    ],
+    'da3_full': [
+        # Additional DA3 dependencies for full functionality
+        'open3d',
+        'fastapi',
+        'uvicorn',
+        'requests',
+        'typer>=0.9.0',
+        'evo',
+        'e3nn',
+        'moviepy==1.0.3',
+        'plyfile',
+        'pillow_heif',
+        'pycolmap',
+        'gradio>=5',  # For DA3 Gradio app
     ],
 }
 

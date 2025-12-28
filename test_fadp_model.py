@@ -291,7 +291,15 @@ def test_model(policy, dataset, device, num_samples=None, batch_size=16):
         for batch_idx, batch in enumerate(tqdm(dataloader, desc="测试中")):
             # 移动到设备
             batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
-            # print(batch['obs'])
+            
+            # 打印第一个batch的obs keys（仅一次）
+            if batch_idx == 0:
+                print(f"\n第一个batch的obs keys: {list(batch['obs'].keys())}")
+                if 'velocity' in batch['obs']:
+                    print(f"velocity shape: {batch['obs']['velocity'].shape}")
+                else:
+                    print("WARNING: 测试batch中没有velocity!")
+            
             # 预测
             result = policy.predict_action(batch['obs'])
             pred_action = result['action_pred']  # (B, T, D)

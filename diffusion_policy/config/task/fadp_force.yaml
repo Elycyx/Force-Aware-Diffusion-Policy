@@ -28,6 +28,16 @@ shape_meta: &shape_meta
       type: low_dim
       ignore_by_policy: False
     
+    # 速度数据（输出到policy）
+    # velocity: [delta_pos(3), delta_rot_euler(3), gripper_abs(1)]
+    velocity:
+      shape: [7]
+      horizon: 1  # velocity 是单时刻的
+      latency_steps: 0
+      down_sample_steps: ${obs_down_sample_steps}
+      type: low_dim
+      ignore_by_policy: False
+    
     # 以下state数据用于计算相对action，但不输出给policy
     robot0_eef_pos:
       shape: [3]
@@ -60,7 +70,7 @@ shape_meta: &shape_meta
     rotation_rep: axis_angle_with_force  # 扩展的表示，包含力
 
 task_name: &task_name fadp_force
-dataset_path: data/basin_noup/dataset.zarr.zip
+dataset_path: data/basin_1223_noup/dataset.zarr.zip
 
 pose_repr: &pose_repr
   obs_pose_repr: relative

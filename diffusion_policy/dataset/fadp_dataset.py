@@ -203,9 +203,11 @@ class FadpDataset(BaseDataset):
         train_mask = ~val_mask
         
         # sampler需要的lowdim_keys（用于读取state，但不作为观测输出）
+        # 注意：velocity 是动态计算的，不在 zarr 中，需要排除
         self.sampler_lowdim_keys = list()
         for key in lowdim_keys:
-            if not 'wrt' in key:
+            # 排除 'wrt' 相关的 key 和 'velocity'（velocity 是动态计算的）
+            if not 'wrt' in key and key != 'velocity' and 'velocity' not in key.lower():
                 self.sampler_lowdim_keys.append(key)
         
         # 创建序列采样器（需要读取state用于action处理）
@@ -406,6 +408,17 @@ class FadpDataset(BaseDataset):
         # 图像归一化（简单的[0,1]归一化）
         for key in self.rgb_keys:
             normalizer[key] = get_image_identity_normalizer()
+
+        # Velocity: identity normalization (no-op)
+        # Velocity vector: [delta_pos(3), delta_rot_euler(3), gripper_abs(1)] => 7 dims
+        # Note: velocity is computed on-the-fly in __getitem__ and may not exist in the replay buffer.
+        velocity_stat = {
+            'min': np.zeros(7, dtype=np.float32),
+            'max': np.ones(7, dtype=np.float32),
+            'mean': np.zeros(7, dtype=np.float32),
+            'std': np.ones(7, dtype=np.float32)
+        }
+        normalizer['velocity'] = get_identity_normalizer_from_stat(velocity_stat)
         
         return normalizer
     
@@ -495,6 +508,50 @@ class FadpDataset(BaseDataset):
                     state_dict[key] = data_value
                 
                 del data[key]
+
+        # ============ 计算 velocity (基于过去2帧 state 的相对变换) ============
+        # velocity = [delta_pos(3), delta_rot_euler(3), gripper_abs(1)]  -> (1, 7)
+        # - 前6维使用相对变换 (T_{t-1}^{-1} * T_t) 提取平移与旋转(欧拉角 xyz)
+        # - gripper 使用当前时刻绝对值
+        try:
+            if (
+                'robot0_eef_pos' in state_dict
+                and 'robot0_eef_rot_axis_angle' in state_dict
+                and 'robot0_gripper_width' in state_dict
+                and state_dict['robot0_eef_pos'].shape[0] >= 2
+                and state_dict['robot0_eef_rot_axis_angle'].shape[0] >= 2
+                and state_dict['robot0_gripper_width'].shape[0] >= 2
+            ):
+                prev_pose = np.concatenate(
+                    [state_dict['robot0_eef_pos'][-2], state_dict['robot0_eef_rot_axis_angle'][-2]],
+                    axis=-1,
+                ).astype(np.float32)  # (6,)
+                curr_pose = np.concatenate(
+                    [state_dict['robot0_eef_pos'][-1], state_dict['robot0_eef_rot_axis_angle'][-1]],
+                    axis=-1,
+                ).astype(np.float32)  # (6,)
+
+                # build 4x4 mats (treat rot as Euler xyz: roll, pitch, yaw)
+                prev_mat = pose_to_mat(prev_pose[None, :])[0]  # (4,4)
+                curr_mat = pose_to_mat(curr_pose[None, :])[0]  # (4,4)
+                rel_mat = np.linalg.inv(prev_mat) @ curr_mat  # (4,4)
+
+                delta_pos = rel_mat[:3, 3].astype(np.float32)  # (3,)
+                rel_rot = R.from_matrix(rel_mat[:3, :3])
+                delta_rot_euler = rel_rot.as_euler('xyz', degrees=False).astype(np.float32)  # (3,)
+
+                gripper_abs = state_dict['robot0_gripper_width'][-1].astype(np.float32)  # (1,) or scalar
+                gripper_abs = np.array(gripper_abs).reshape(-1).astype(np.float32)  # (1,)
+
+                velocity = np.concatenate([delta_pos, delta_rot_euler, gripper_abs], axis=-1).astype(np.float32)  # (7,)
+            else:
+                velocity = np.zeros((7,), dtype=np.float32)
+        except Exception:
+            # be robust: if any unexpected format, fall back to zeros
+            velocity = np.zeros((7,), dtype=np.float32)
+
+        # add to obs_dict as a single-step lowdim observation (T=1, D=7)
+        obs_dict['velocity'] = velocity[None, :]
         
         # ============ 处理action：转换为相对表示 ============
         # 

@@ -66,12 +66,10 @@ def load_episode_hdf5(file_path, target_image_shape=(224, 224), num_workers=4):
         action = f['action'][:].astype(np.float32)  # (T, 7)
         image = f['image'][:]  # (T, 480, 640, 3) uint8
         
-        # 对action的rz（索引5）调整：第一个元素-pi/2，后面的元素-pi
-        action[0, 5] -= np.pi / 2
-        if len(action) > 1:
-            action[1:, 5] -= np.pi
-        # 将action的x和y坐标取反
-        action[:, 0:2] *= -1
+        action[:, 5] += np.pi / 2
+
+        # # 将action的x和y坐标取反
+        # action[:, 0:2] *= -1
         
         # state使用当前action，action往后移一步
         # state[t]对应原始action[t]，action[t]对应原始action[t+1]
